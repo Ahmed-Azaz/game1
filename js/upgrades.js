@@ -6,7 +6,7 @@ export const upgradeSystem = {
         hp: { base: 10, points: 0, increment: 1 },
         
         // 2. HP Regeneration - HP/sec when not taking damage
-        hpRegen: { base: 0, points: 0, increment: 1 },
+        hpRegen: { base: 1, points: 0, increment: 1 },
         
         // 3. Move Speed - Pixels per second
         moveSpeed: { base: 180, points: 0, increment: 7, percentPerPoint: 0.05 },
@@ -77,7 +77,7 @@ export const upgradeSystem = {
         const playerStats = {};
         
         // 1. HP: Base + (points * increment)
-        this.stats.hp.current = this.stats.hp.base + (this.stats.hp.points * this.stats.hp.increment);
+        this.stats.hp.current = this.player.MaxHP + (this.stats.hp.points * this.stats.hp.increment);
         
         // 2. HP Regeneration: Base + (points * increment)
         this.stats.hpRegen.current = this.stats.hpRegen.base + (this.stats.hpRegen.points * this.stats.hpRegen.increment);
