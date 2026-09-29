@@ -16,7 +16,7 @@ export const player = {
     moveSpeed: 180, // pixels per second (base, modified by stats)
     attackPower: 10, // Base damage
     attackSpeed: 1.0, // Attacks per second
-    attackRange: 50, // Pixels
+    attackRange: 100, // Pixels
     criticalChance: 5, // Percent
     criticalDamage: 150, // Percent
     echoPower: 1.0, // Echo damage multiplier
