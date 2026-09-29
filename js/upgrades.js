@@ -3,7 +3,7 @@ export const upgradeSystem = {
     // Stat base values (will be modified by points)
     stats: {
         // 1. HP - Maximum health
-        hp: { base: 100, points: 0, increment: 15 },
+        hp: { base: 10, points: 0, increment: 1 },
         
         // 2. HP Regeneration - HP/sec when not taking damage
         hpRegen: { base: 0, points: 0, increment: 1 },
