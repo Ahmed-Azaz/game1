@@ -18,7 +18,7 @@ export const upgradeSystem = {
         attackSpeed: { base: 1.0, points: 0, increment: 0.15 },
         
         // 6. Attack Range - Pixels to target
-        attackRange: { base: 200, points: 0, increment: 30 },
+        attackRange: { base: 50, points: 0, increment: 5 },
         
         // 7. Critical Chance - Percent
         criticalChance: { base: 5, points: 0, increment: 0.75 },
