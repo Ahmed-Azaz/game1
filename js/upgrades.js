@@ -1,3 +1,4 @@
+import { player } from './player.js';
 // Upgrade/stat system - 12 RPG stats with meaningful effects
 export const upgradeSystem = {
     // Stat base values (will be modified by points)
@@ -77,7 +78,7 @@ export const upgradeSystem = {
         const playerStats = {};
         
         // 1. HP: Base + (points * increment)
-        this.stats.hp.current = this.player.MaxHP + (this.stats.hp.points * this.stats.hp.increment);
+        this.stats.hp.current = this.player.maxHP + (this.stats.hp.points * this.stats.hp.increment);
         
         // 2. HP Regeneration: Base + (points * increment)
         this.stats.hpRegen.current = this.stats.hpRegen.base + (this.stats.hpRegen.points * this.stats.hpRegen.increment);
