@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echo Rift</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas" width="960" height="540"></canvas>
+        <div id="ui-overlay">
+            <div id="hud">
+                <div id="level-display">Lv. 1</div>
+                <div id="xp-bar-container">
+                    <div id="xp-bar-fill"></div>
+                </div>
+                <div id="xp-text">0 / 100 XP</div>
+            </div>
+            <div id="echo-shift-indicator" style="display: none;">
+                <span id="echo-shift-text">ECHO SHIFT: READY</span>
+                <span id="echo-shift-cooldown">0.0s</span>
+            </div>
+            <div id="pause-button">≡</div>
+        </div>
+        <div id="pause-menu" style="display: none;">
+            <div class="menu-overlay">
+                <h2>PAUSED</h2>
+                <button id="resume-btn">Resume</button>
+                <button id="stats-btn">Stats</button>
+                <button id="settings-btn">Settings</button>
+                <button id="restart-btn">Restart Run</button>
+                <button id="quit-btn">Quit to Title</button>
+            </div>
+        </div>
+        <div id="game-over" style="display: none;">
+            <div class="menu-overlay">
+                <h2>RUN OVER</h2>
+                <div id="run-summary">
+                    <div>Survival Time: <span id="survival-time">00:00</span></div>
+                    <div>Enemies Defeated: <span id="enemies-defeated">0</span></div>
+                    <div>Fragments Collected: <span id="fragments-collected">0</span></div>
+                    <div>Level Reached: <span id="level-reached">1</span></div>
+                </div>
+                <div id="final-stats" style="display: none;">
+                    <div>Damage Dealt: <span id="damage-dealt">0</span></div>
+                    <div>Echo Damage: <span id="echo-damage">0</span></div>
+                    <div>Stat Points Spent: <span id="stat-points-spent">0</span></div>
+                </div>
+                <button id="restart-btn2">Play Again</button>
+                <button id="main-menu-btn">Main Menu</button>
+            </div>
+        </div>
+        <div id="onboarding" style="display: block;">
+            <div class="onboarding-screen">
+                <h3>Echo Rift</h3>
+                <p id="onboarding-prompt1">Move with WASD or Arrow Keys</p>
+                <button class="skip-tutorial">Skip</button>
+            </div>
+            <div class="onboarding-screen">
+                <h3>Echo Rift</h3>
+                <p id="onboarding-prompt2">Collect Echo Fragments to gain XP</p>
+                <button class="skip-tutorial">Skip</button>
+            </div>
+            <div class="onboarding-screen">
+                <h3>Echo Rift</h3>
+                <p id="onboarding-prompt3">Level up and spend your Stat Points</p>
+                <button class="skip-tutorial">Skip</button>
+            </div>
+            <div class="onboarding-screen">
+                <h3>Echo Rift</h3>
+                <p id="onboarding-prompt4">Echo Shift: SPACE — your recent movement becomes an attack</p>
+                <button class="skip-tutorial">Skip</button>
+            </div>
+        </div>
+        <div id="stat-screen-container" style="display: none;"></div>
+        <div id="settings-panel" style="display: none;">
+            <div class="menu-overlay">
+                <h2>SETTINGS</h2>
+                <div class="setting-row">
+                    <label>Master Volume:</label>
+                    <input type="range" id="master-vol" min="0" max="1" step="0.1" value="0.7">
+                </div>
+                <div class="setting-row">
+                    <label>SFX Volume:</label>
+                    <input type="range" id="sfx-vol" min="0" max="1" step="0.1" value="0.7">
+                </div>
+                <button id="close-settings-btn">Close</button>
+            </div>
+        </div>
+        <div id="wave-notice-container"></div>
+        <div id="touch-controls" style="display: none;">
+            <div id="joystick-area">
+                <div id="joystick-base"></div>
+                <div id="joystick-stick"></div>
+            </div>
+            <div id="touch-echo-btn">SHIFT</div>
+        </div>
+    </div>
+    <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
