@@ -30,7 +30,7 @@ const enemyTemplates = {
         name: 'Shardling',
         color: '#78ff9b',
         hp: 10,
-        speed: 90,
+        speed: 300,
         damage: 1,
         xp: 10,
         size: 12,
