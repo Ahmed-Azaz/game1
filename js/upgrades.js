@@ -1,4 +1,3 @@
-import { player } from './player.js';
 // Upgrade/stat system - 12 RPG stats with meaningful effects
 export const upgradeSystem = {
     // Stat base values (will be modified by points)
@@ -19,7 +18,7 @@ export const upgradeSystem = {
         attackSpeed: { base: 1.0, points: 0, increment: 0.15 },
         
         // 6. Attack Range - Pixels to target
-        attackRange: { base: 100, points: 0, increment: 10 },
+        attackRange: { base: 50, points: 0, increment: 5 },
         
         // 7. Critical Chance - Percent
         criticalChance: { base: 5, points: 0, increment: 0.75 },
