@@ -78,7 +78,7 @@ export const upgradeSystem = {
         const playerStats = {};
         
         // 1. HP: Base + (points * increment)
-        this.stats.hp.current = this.player.maxHP + (this.stats.hp.points * this.stats.hp.increment);
+        this.stats.hp.current = this.stats.hp.base + (this.stats.hp.points * this.stats.hp.increment);
         
         // 2. HP Regeneration: Base + (points * increment)
         this.stats.hpRegen.current = this.stats.hpRegen.base + (this.stats.hpRegen.points * this.stats.hpRegen.increment);
