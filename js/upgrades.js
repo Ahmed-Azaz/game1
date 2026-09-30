@@ -1,10 +1,10 @@
 // Upgrade/stat system - 12 RPG stats with meaningful effects.
-// Most offensive and survival stats scale by a percentage of their base value
-// per point spent, so early and late points stay equally meaningful.
+// Percentage stats multiply their CURRENT value on every point spent, so the
+// 20th point is worth as much as the 1st instead of adding a flat number.
 export const upgradeSystem = {
     stats: {
         // 1. HP - Maximum health
-        hp: { base: 10, points: 0, percentPerPoint: 0.08, integer: true },
+        hp: { base: 10, points: 0, percentPerPoint: 0.08, round: 'ceil' },
 
         // 2. HP Regeneration - HP/sec when not taking damage
         hpRegen: { base: 1, points: 0, percentPerPoint: 0.10 },
@@ -13,7 +13,7 @@ export const upgradeSystem = {
         moveSpeed: { base: 180, points: 0, percentPerPoint: 0.05, round: 'floor' },
 
         // 4. Attack Power - Base damage
-        attackPower: { base: 10, points: 0, percentPerPoint: 0.10 },
+        attackPower: { base: 10, points: 0, percentPerPoint: 0.10, round: 'ceil' },
 
         // 5. Attack Speed - Attacks per second
         attackSpeed: { base: 1.0, points: 0, percentPerPoint: 0.12 },
@@ -22,16 +22,16 @@ export const upgradeSystem = {
         attackRange: { base: 150, points: 0, increment: 10 },
 
         // 7. Critical Chance - Percent
-        criticalChance: { base: 5, points: 0, percentPerPoint: 0.15, min: 0, max: 25 },
+        criticalChance: { base: 5, points: 0, percentPerPoint: 0.15, round: 'ceil', min: 0, max: 25 },
 
         // 8. Critical Damage - Percent multiplier
-        criticalDamage: { base: 150, points: 0, percentPerPoint: 0.03, min: 100, max: 300 },
+        criticalDamage: { base: 150, points: 0, percentPerPoint: 0.03, round: 'ceil', min: 100, max: 300 },
 
         // 9. Echo Power - Echo damage multiplier
-        echoPower: { base: 1.0, points: 0, percentPerPoint: 0.25, min: 0.5 },
+        echoPower: { base: 1.0, points: 0, percentPerPoint: 0.25 },
 
         // 10. Echo Duration - Seconds echo lasts
-        echoDuration: { base: 3.0, points: 0, percentPerPoint: 0.10, min: 1.0 },
+        echoDuration: { base: 3.0, points: 0, percentPerPoint: 0.10 },
 
         // 11. Echo Cooldown - Seconds before echo reuse
         echoCooldown: { base: 15.0, points: 0, increment: -1.0, min: 2.0 },
@@ -60,24 +60,39 @@ export const upgradeSystem = {
         this.recalculateAllStats();
     },
     
-    // One place decides how a stat grows, so the stat screen and the player
-    // always read the same numbers.
-    resolveStat(def) {
-        const percent = def.percentPerPoint || 0;
-        let value = def.base * (1 + def.points * percent) + (def.increment || 0) * def.points;
-
-        if (def.integer) {
-            value = Math.round(value);
-        } else if (def.round === 'floor') {
-            value = Math.floor(value);
+    // Grows the CURRENT value by one point. Percentages multiply what the stat
+    // already is (10 -> 11 -> 13 for 10%), and ceil keeps a small fractional
+    // gain such as 11 * 1.1 = 12.1 visible instead of rounding it away.
+    growOnce(def, value) {
+        const EPSILON = 1e-9; // keeps 10 * 1.1 = 11.000000000000002 at 11
+        let next;
+        if (def.percentPerPoint) {
+            const grown = value * (1 + def.percentPerPoint);
+            if (def.round === 'ceil') next = Math.ceil(grown - EPSILON);
+            else if (def.round === 'floor') next = Math.floor(grown);
+            else next = Math.round(grown * 100) / 100;
         } else {
-            // Trims float noise from repeated multiplications
-            value = Math.round(value * 100) / 100;
+            next = value + (def.increment || 0);
         }
+        if (def.min !== undefined) next = Math.max(def.min, next);
+        if (def.max !== undefined) next = Math.min(def.max, next);
+        return next;
+    },
 
-        if (def.min !== undefined) value = Math.max(def.min, value);
-        if (def.max !== undefined) value = Math.min(def.max, value);
-        return value;
+    // The growth path only depends on base and rate, so it is built once and
+    // reused instead of recomputed on every stat screen render.
+    resolveStat(def) {
+        const rate = def.percentPerPoint || 0;
+        if (def._pathBase !== def.base || def._pathRate !== rate || def._pathIncrement !== def.increment) {
+            def._pathBase = def.base;
+            def._pathRate = rate;
+            def._pathIncrement = def.increment;
+            def._path = [def.base];
+        }
+        while (def._path.length <= def.points) {
+            def._path.push(this.growOnce(def, def._path[def._path.length - 1]));
+        }
+        return def._path[def.points];
     },
 
     recalculateAllStats() {

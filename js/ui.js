@@ -293,7 +293,7 @@ function renderStatScreen() {
         const def = upgradeSystem.stats[stat.key];
         const base = def.base;
         const points = def.points;
-        const bonus = calculateBonus(stat.key);
+        const bonus = calculateBonus(stat.key, current, base);
 
         let formatText = current;
         if (stat.format === 'hpRegen') {
@@ -365,23 +365,23 @@ function closeStatScreenAndResume() {
     }
 }
 
-// Bonus text for the stat screen. Percentage stats report the multiplier they
-// add; flat stats report the raw amount.
-function calculateBonus(statKey) {
+// Bonus text for the stat screen. Percentage stats report how far the value
+// has grown from base; flat stats report the raw amount added.
+function calculateBonus(statKey, current, base) {
     const stat = upgradeSystem.stats[statKey];
     if (stat.points === 0) return stat.percentPerPoint ? '0%' : '0';
 
     if (stat.percentPerPoint) {
-        const percent = stat.points * stat.percentPerPoint * 100;
+        const percent = ((current - base) / base) * 100;
         return `+${trim(percent)}%`;
     }
     if (statKey === 'echoCooldown') {
-        return `-${trim(Math.abs(stat.points * stat.increment))}s`;
+        return `-${trim(Math.abs(current - base))}s`;
     }
     if (statKey === 'fragmentMagnet') {
-        return `+${trim(stat.points * stat.increment)} px`;
+        return `+${trim(current - base)} px`;
     }
-    return `+${trim(stat.points * stat.increment)}`;
+    return `+${trim(current - base)}`;
 }
 
 function trim(value) {
