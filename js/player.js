@@ -13,8 +13,8 @@ export const player = {
     vy: 0,
     
     // Stats
-    hp: 10,
-    maxHP: 10,
+    hp: 100,
+    maxHP: 100,
     moveSpeed: 180, // pixels per second (base, modified by stats)
     attackPower: 10, // Base damage
     attackSpeed: 1.0, // Attacks per second
