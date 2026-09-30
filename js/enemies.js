@@ -2,7 +2,8 @@
 import { player } from './player.js';
 import * as game from './game.js';
 import * as audio from './audio.js';
-import { spawnBurst } from './visual-effects.js';
+import { spawnBurst, triggerScreenShake } from './visual-effects.js';
+import { spawnOrb } from './fragments.js';
 
 // Enemy types data
 const enemyTemplates = {
@@ -81,6 +82,31 @@ const enemyTemplates = {
 // Active enemies array
 let activeEnemies = [];
 let enemyIdCounter = 0;
+let currentWave = 1;
+
+// Enemy types that are bosses or elites scale more gently than fodder.
+const BOSS_TYPES = new Set(['rift_core', 'rift_warden']);
+
+// Wave scaling: without this, waves only add bodies and the game plateaus once
+// the player has a few attack-power points.
+function waveScaling(wave, type) {
+    const boss = BOSS_TYPES.has(type);
+    const steps = Math.max(0, wave - 1);
+    return {
+        hp: 1 + steps * (boss ? 0.14 : 0.20),
+        damage: 1 + steps * 0.055,
+        speed: Math.min(1.35, 1 + steps * 0.018),
+        xp: 1 + steps * 0.06
+    };
+}
+
+export function setWave(wave) {
+    currentWave = Math.max(1, wave || 1);
+}
+
+export function getWave() {
+    return currentWave;
+}
 
 export function create(type) {
     const template = enemyTemplates[type];
@@ -88,6 +114,9 @@ export function create(type) {
         // Fallback to drifter
         return create('drifter');
     }
+    
+    const scale = waveScaling(currentWave, type);
+    const hp = Math.round(template.hp * scale.hp);
     
     const enemy = {
         id: enemyIdCounter++,
@@ -97,14 +126,16 @@ export function create(type) {
         y: 0,
         vx: 0,
         vy: 0,
-        hp: template.hp,
-        maxHP: template.hp,
-        damage: template.damage,
-        xp: template.xp,
+        hp,
+        maxHP: hp,
+        damage: template.damage * scale.damage,
+        xp: Math.round(template.xp * scale.xp),
         size: template.size,
         color: template.color,
-        aiState: 'approach', // approach, rush, flee, summon
-        timeSinceAction: 0
+        baseSpeed: template.speed * scale.speed,
+        aiState: 'approach', // approach, rush_windup, rushing, flee, summon
+        timeSinceAction: Math.random() * 2,
+        lastDamageTime: -Infinity
     };
     
     activeEnemies.push(enemy);
@@ -130,12 +161,18 @@ export function updateAll(deltaTime) {
         
         // Contact damage
         const distToPlayer = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-        const playerRadius = 15;
+        const playerRadius = player.radius || 15;
         if (distToPlayer < enemy.size + playerRadius) {
             const now = performance.now() / 1000;
-            if (now - (enemy.lastDamageTime || 0) > 0.5) {
+            if (now - enemy.lastDamageTime > 0.5) {
                 player.takeDamage(enemy.damage);
                 enemy.lastDamageTime = now;
+                // Small shove so the player is never pinned inside a body
+                if (distToPlayer > 0.01) {
+                    const shove = 60;
+                    enemy.x -= ((player.x - enemy.x) / distToPlayer) * shove;
+                    enemy.y -= ((player.y - enemy.y) / distToPlayer) * shove;
+                }
             }
         }
         
@@ -154,18 +191,15 @@ export function updateAll(deltaTime) {
     for (let i = activeEnemies.length - 1; i >= 0; i--) {
         if (activeEnemies[i].hp <= 0) {
             const enemy = activeEnemies[i];
-            spawnBurst(enemy.x, enemy.y, enemy.color, enemy.type === 'rift_warden' || enemy.type === 'rift_core' ? 24 : 14);
-            game.addXP(enemy.xp);
+            const isBoss = enemy.type === 'rift_warden' || enemy.type === 'rift_core';
+            spawnBurst(enemy.x, enemy.y, enemy.color, isBoss ? 24 : 14);
+            if (isBoss) triggerScreenShake(8, 0.25);
             game.addEnemiesDefeated();
-            game.addDamageDealt(enemy.damage * 0.1); // Credit damage
-            
-            // Sound
-            audio.play('enemy_death');
-            
-            // Drop fragments chance
-            if (Math.random() < 0.8) {
-                // Fragment handled by XP system
+            spawnOrb(enemy.x, enemy.y, enemy.xp);
+            if (Math.random() < 0.35) {
+                spawnOrb(enemy.x + (Math.random() - 0.5) * 24, enemy.y + (Math.random() - 0.5) * 24, Math.max(5, Math.floor(enemy.xp * 0.5)));
             }
+            audio.play('enemy_death');
             
             activeEnemies.splice(i, 1);
         }
@@ -185,8 +219,8 @@ function updateEnemyAI(enemy, deltaTime) {
     switch (enemy.type) {
         case 'drifter':
             // Simple approach
-            enemy.vx = nx * enemy.template.speed;
-            enemy.vy = ny * enemy.template.speed;
+            enemy.vx = nx * enemy.baseSpeed;
+            enemy.vy = ny * enemy.baseSpeed;
             break;
             
         case 'charger':
@@ -213,8 +247,8 @@ function updateEnemyAI(enemy, deltaTime) {
                 }
             } else {
                 enemy.timeSinceAction += deltaTime;
-                enemy.vx = nx * enemy.template.speed;
-                enemy.vy = ny * enemy.template.speed;
+                enemy.vx = nx * enemy.baseSpeed;
+                enemy.vy = ny * enemy.baseSpeed;
                 if (enemy.timeSinceAction > 3.0) { // rush every 3 seconds
                     enemy.aiState = 'rush_windup';
                     enemy.timeSinceAction = 0;
@@ -224,19 +258,19 @@ function updateEnemyAI(enemy, deltaTime) {
             
         case 'shardling':
             // Approach in groups - slight wandering
-            enemy.vx = nx * enemy.template.speed * (0.5 + Math.random() * 0.5);
-            enemy.vy = ny * enemy.template.speed * (0.5 + Math.random() * 0.5);
+            enemy.vx = nx * enemy.baseSpeed * (0.5 + Math.random() * 0.5);
+            enemy.vy = ny * enemy.baseSpeed * (0.5 + Math.random() * 0.5);
             // Occasionally change direction
             if (Math.random() < 0.01) {
-                enemy.vx = (Math.random() - 0.5) * enemy.template.speed * 2;
-                enemy.vy = (Math.random() - 0.5) * enemy.template.speed * 2;
+                enemy.vx = (Math.random() - 0.5) * enemy.baseSpeed * 2;
+                enemy.vy = (Math.random() - 0.5) * enemy.baseSpeed * 2;
             }
             break;
             
         case 'null_beast':
             // Slow approach, but stays closer to player
-            enemy.vx = nx * enemy.template.speed;
-            enemy.vy = ny * enemy.template.speed;
+            enemy.vx = nx * enemy.baseSpeed;
+            enemy.vy = ny * enemy.baseSpeed;
             // Don't stray too far
             if (distance > 400) {
                 // Push toward center
@@ -246,27 +280,21 @@ function updateEnemyAI(enemy, deltaTime) {
             break;
             
         case 'echo_hunter':
-            // Detect echo path and avoid it
-            // Simple version: flee from player at medium range
+            // Flees the player at mid range and actively dodges the live echo trail
             if (distance > 150 && distance < 400) {
                 // Flee from player
-                enemy.vx = -nx * enemy.template.speed * 1.5;
-                enemy.vy = -ny * enemy.template.speed * 1.5;
+                enemy.vx = -nx * enemy.baseSpeed * 1.5;
+                enemy.vy = -ny * enemy.baseSpeed * 1.5;
             } else {
                 // Normal approach
-                enemy.vx = nx * enemy.template.speed;
-                enemy.vy = ny * enemy.template.speed;
+                enemy.vx = nx * enemy.baseSpeed;
+                enemy.vy = ny * enemy.baseSpeed;
             }
-            // Check if echo is active and adjust
-            if (game && game.echoShift && game.echoShift.isActive) {
-                // Additional avoidance behavior
-                const echoPath = game.echoShift.path;
-                if (echoPath && echoPath.length > 10) {
-                    // Simple: slow down near echo path
-                    if (distance < 300) {
-                        enemy.vx *= 0.9;
-                        enemy.vy *= 0.9;
-                    }
+            if (game.echoShift?.isActive) {
+                const dodge = dodgeVectorFromEcho(enemy);
+                if (dodge) {
+                    enemy.vx += dodge.x * enemy.baseSpeed * 1.8;
+                    enemy.vy += dodge.y * enemy.baseSpeed * 1.8;
                 }
             }
             break;
@@ -282,15 +310,70 @@ function updateEnemyAI(enemy, deltaTime) {
                 enemy.timeSinceAction = 0;
             }
             // Approach player
-            enemy.vx = nx * enemy.template.speed;
-            enemy.vy = ny * enemy.template.speed;
+            enemy.vx = nx * enemy.baseSpeed;
+            enemy.vy = ny * enemy.baseSpeed;
             break;
             
         case 'rift_core':
-            // Boss: complex AI handled in game.js boss encounters
-            enemy.vx = nx * enemy.template.speed * 0.5;
-            enemy.vy = ny * enemy.template.speed * 0.5;
+            updateRiftCoreBoss(enemy, deltaTime, nx, ny, distance);
             break;
+    }
+}
+
+// Steering vector pushing an enemy away from the part of the echo trail that
+// has already been swept (plus the head), so hunters dodge the live damage.
+function dodgeVectorFromEcho(enemy) {
+    const echo = game.echoShift;
+    const path = echo.path;
+    if (!path || path.length < 2) return null;
+
+    const samples = [echo.headX, echo.headY];
+    for (let i = Math.max(0, echo.replaySegmentIndex - 12); i <= Math.min(path.length - 1, echo.replaySegmentIndex); i++) {
+        samples.push(path[i].x, path[i].y);
+    }
+
+    let pushX = 0;
+    let pushY = 0;
+    let hits = 0;
+    for (let i = 0; i < samples.length; i += 2) {
+        const dx = enemy.x - samples[i];
+        const dy = enemy.y - samples[i + 1];
+        const d = Math.hypot(dx, dy);
+        if (d < 70 && d > 0.01) {
+            pushX += dx / d;
+            pushY += dy / d;
+            hits++;
+        }
+    }
+    if (!hits) return null;
+    const len = Math.hypot(pushX, pushY) || 1;
+    return { x: pushX / len, y: pushY / len };
+}
+
+function updateRiftCoreBoss(enemy, deltaTime, nx, ny, distance) {
+    const hpRatio = enemy.hp / enemy.maxHP;
+    if (!enemy.phaseTriggered) enemy.phaseTriggered = {};
+    if (hpRatio <= 0.66 && !enemy.phaseTriggered.p66) {
+        enemy.phaseTriggered.p66 = true;
+        audio.play('boss_warning');
+        triggerScreenShake(7, 0.3);
+        for (let i = 0; i < 3; i++) {
+            const minion = create('drifter');
+            minion.x = enemy.x + (Math.random() - 0.5) * 80;
+            minion.y = enemy.y + (Math.random() - 0.5) * 80;
+        }
+    }
+    if (hpRatio <= 0.33 && !enemy.phaseTriggered.p33) {
+        enemy.phaseTriggered.p33 = true;
+        audio.play('boss_warning');
+        enemy.phaseSpeed = 1.45; // per-enemy, the shared template must stay clean
+    }
+    const speed = enemy.baseSpeed * (hpRatio < 0.33 ? (enemy.phaseSpeed || 1.2) : 0.55);
+    enemy.vx = nx * speed;
+    enemy.vy = ny * speed;
+    if (distance < 120) {
+        enemy.vx *= 0.85;
+        enemy.vy *= 0.85;
     }
 }
 

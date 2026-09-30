@@ -1,7 +1,42 @@
 const particles = [];
 const damageLabels = [];
 const bursts = [];
-const PARTICLE_LIMIT = 240;
+let particleLimit = 240;
+let screenShakeEnabled = true;
+let screenShakeUntil = 0;
+let screenShakeStart = 0;
+let screenShakeDuration = 0.12;
+let screenShakeIntensity = 0;
+
+export function setParticleQuality(quality) {
+    if (quality === 'low') particleLimit = 120;
+    else if (quality === 'high') particleLimit = 320;
+    else particleLimit = 240;
+}
+
+export function setScreenShakeEnabled(enabled) {
+    screenShakeEnabled = !!enabled;
+}
+
+export function triggerScreenShake(intensity = 4, duration = 0.12) {
+    if (!screenShakeEnabled) return;
+    screenShakeIntensity = intensity;
+    screenShakeDuration = Math.max(0.01, duration);
+    screenShakeStart = performance.now() / 1000;
+    screenShakeUntil = screenShakeStart + screenShakeDuration;
+}
+
+export function getScreenShakeOffset(t) {
+    if (!screenShakeEnabled || t >= screenShakeUntil) return { x: 0, y: 0 };
+    // Ramp up then decay, scaled to the real duration of this shake
+    const elapsed = t - screenShakeStart;
+    const falloff = 1 - elapsed / screenShakeDuration;
+    const amp = screenShakeIntensity * falloff;
+    return {
+        x: (Math.random() - 0.5) * amp * 2,
+        y: (Math.random() - 0.5) * amp * 2
+    };
+}
 
 export function spawnHit(x, y, color, amount, critical = false) {
     spawnBurst(x, y, color, 5);
@@ -10,7 +45,7 @@ export function spawnHit(x, y, color, amount, critical = false) {
 
 export function spawnBurst(x, y, color, count = 12) {
     const now = performance.now() / 1000;
-    for (let i = 0; i < count && particles.length < PARTICLE_LIMIT; i++) {
+    for (let i = 0; i < count && particles.length < particleLimit; i++) {
         const angle = Math.random() * Math.PI * 2;
         const speed = 35 + Math.random() * 90;
         particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, color, born: now, life: .25 + Math.random() * .35, size: 1.5 + Math.random() * 2.2 });

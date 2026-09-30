@@ -12,10 +12,19 @@
         <div id="ui-overlay">
             <div id="hud">
                 <div id="level-display">Lv. 1</div>
+                <div id="hp-bar-container">
+                    <div id="hp-bar-fill"></div>
+                </div>
+                <div id="hp-text">10 / 10 HP</div>
                 <div id="xp-bar-container">
                     <div id="xp-bar-fill"></div>
                 </div>
                 <div id="xp-text">0 / 100 XP</div>
+                <div id="run-info">
+                    <span id="wave-display">Wave 1</span>
+                    <span id="time-display">0:00</span>
+                    <span id="best-display" class="record">Best 0:00</span>
+                </div>
             </div>
             <div id="echo-shift-indicator" style="display: none;">
                 <span id="echo-shift-text">ECHO SHIFT: READY</span>
@@ -38,9 +47,11 @@
                 <h2>RUN OVER</h2>
                 <div id="run-summary">
                     <div>Survival Time: <span id="survival-time">00:00</span></div>
+                    <div>Best Time: <span id="best-survival-time">00:00</span></div>
                     <div>Enemies Defeated: <span id="enemies-defeated">0</span></div>
                     <div>Fragments Collected: <span id="fragments-collected">0</span></div>
                     <div>Level Reached: <span id="level-reached">1</span></div>
+                    <div>Best Level: <span id="best-level">1</span></div>
                 </div>
                 <div id="final-stats" style="display: none;">
                     <div>Damage Dealt: <span id="damage-dealt">0</span></div>
@@ -51,26 +62,38 @@
                 <button id="main-menu-btn">Main Menu</button>
             </div>
         </div>
-        <div id="onboarding" style="display: block;">
-            <div class="onboarding-screen">
-                <h3>Echo Rift</h3>
-                <p id="onboarding-prompt1">Move with WASD or Arrow Keys</p>
-                <button class="skip-tutorial">Skip</button>
+        <div id="title-screen">
+            <div class="title-card">
+                <h1>Echo Rift</h1>
+                <p class="title-tagline">Your path becomes the weapon.</p>
+                <button id="title-play-btn">Play</button>
+                <button id="title-howto-btn" class="secondary-btn">How to Play</button>
+                <p class="title-best" id="title-best">Best Run: —</p>
             </div>
-            <div class="onboarding-screen">
-                <h3>Echo Rift</h3>
-                <p id="onboarding-prompt2">Collect Echo Fragments to gain XP</p>
-                <button class="skip-tutorial">Skip</button>
-            </div>
-            <div class="onboarding-screen">
-                <h3>Echo Rift</h3>
-                <p id="onboarding-prompt3">Level up and spend your Stat Points</p>
-                <button class="skip-tutorial">Skip</button>
-            </div>
-            <div class="onboarding-screen">
-                <h3>Echo Rift</h3>
-                <p id="onboarding-prompt4">Echo Shift: SPACE — your recent movement becomes an attack</p>
-                <button class="skip-tutorial">Skip</button>
+        </div>
+        <div id="onboarding" style="display: none;">
+            <div id="onboarding-wizard">
+                <p id="onboarding-step">1 / 4</p>
+                <div class="onboarding-screen">
+                    <h3>Movement</h3>
+                    <p>Desktop: WASD or Arrow Keys.<br>Mobile: virtual joystick (bottom-left).</p>
+                </div>
+                <div class="onboarding-screen">
+                    <h3>Echo Fragments</h3>
+                    <p>Defeated enemies drop fragments. Collect them for XP — upgrade Fragment Magnet to pull them from farther away.</p>
+                </div>
+                <div class="onboarding-screen">
+                    <h3>Level Up</h3>
+                    <p>Levels grant Stat Points. Spend them on power, speed, echo strength, and more — the arena pauses while you choose.</p>
+                </div>
+                <div class="onboarding-screen">
+                    <h3>Echo Shift</h3>
+                    <p>Press SPACE (or the SHIFT button on mobile). Your recent movement sweeps the arena as a damaging echo trail.</p>
+                </div>
+                <div class="onboarding-nav">
+                    <button id="onboarding-next">Next</button>
+                    <button id="onboarding-skip-all">Start Now</button>
+                </div>
             </div>
         </div>
         <div id="stat-screen-container" style="display: none;"></div>
@@ -84,6 +107,18 @@
                 <div class="setting-row">
                     <label>SFX Volume:</label>
                     <input type="range" id="sfx-vol" min="0" max="1" step="0.1" value="0.7">
+                </div>
+                <div class="setting-row">
+                    <label>Particles:</label>
+                    <select id="particle-quality">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <label>Screen Shake:</label>
+                    <input type="checkbox" id="screen-shake" checked>
                 </div>
                 <button id="close-settings-btn">Close</button>
             </div>

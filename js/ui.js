@@ -1,30 +1,107 @@
 // UI system - HUD, stat screen, run summary, and settings
 import * as game from './game.js';
+import { player } from './player.js';
 import { upgradeSystem } from './upgrades.js';
 import * as audio from './audio.js';
+import { saveSystem, persistGameSettings } from './save.js';
 
+// main.js drives the HUD and overlays through this object, so every entry point
+// it calls has to be exposed here.
 export const ui = {
     init() {
-        // Set up event listeners
         setUpEventListeners();
-    }
+        initOnboardingWizard();
+        refreshTitleBest();
+    },
+    tickHUD,
+    beginRun,
+    closeStatScreen,
+    continueFromStatScreen: closeStatScreenAndResume,
+    closeSettings
 };
 
+let statScreenMode = 'manual';
+
+export function tickHUD() {
+    if (!game.gameState) return;
+    updateHUD();
+}
+
+export function openLevelUpStatScreen() {
+    statScreenMode = 'levelUp';
+    renderStatScreen();
+}
+
+export function beginRun() {
+    document.getElementById('onboarding').style.display = 'none';
+    // Defensive: an overlay left visible would keep the input layer on the title state
+    const title = document.getElementById('title-screen');
+    if (title) title.style.display = 'none';
+    saveSystem.saveData.onboardingCompleted = true;
+    saveSystem.save();
+    // A fresh run: this also shows the Wave 1 banner and reports gameplay to the portal
+    game.restartRun();
+}
+
+export function closeStatScreen() {
+    const container = document.getElementById('stat-screen-container');
+    if (container) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+    }
+    statScreenMode = 'manual';
+}
+
+function refreshTitleBest() {
+    const el = document.getElementById('title-best');
+    if (!el) return;
+    const best = saveSystem.saveData.bestTime || 0;
+    el.textContent = best > 0
+        ? `Best Run: ${game.formatTime(best)} · Lv. ${saveSystem.saveData.highestLevel || 1}`
+        : 'Best Run: —';
+}
+
+function initOnboardingWizard() {
+    const screens = document.querySelectorAll('#onboarding .onboarding-screen');
+    screens.forEach((screen, index) => {
+        screen.style.display = index === 0 ? 'block' : 'none';
+    });
+    const stepLabel = document.getElementById('onboarding-step');
+    if (stepLabel) stepLabel.textContent = `1 / ${screens.length}`;
+}
+
 function setUpEventListeners() {
+    // Continue is delegated so it survives the container being re-rendered
+    document.getElementById('stat-screen-container').addEventListener('click', (e) => {
+        if (e.target.id === 'continue-btn') {
+            closeStatScreenAndResume();
+        }
+    });
+
     // Stat point buttons
     document.addEventListener('click', (e) => {
-        if (e.target.classList.contains('stat-plus')) {
-            const statKey = e.target.dataset.stat;
-            upgradeSystem.addPoint(statKey);
-            game.applyPlayerStats();
-            renderStatScreen();
+        if (e.target.classList.contains('stat-plus') && !e.target.disabled) {
+            if (upgradeSystem.addPoint(e.target.dataset.stat)) {
+                game.applyPlayerStats();
+                audio.play('stat-upgrade');
+                renderStatScreen();
+            }
         }
         
         // Skip tutorial
-        if (e.target.classList.contains('skip-tutorial')) {
-            document.getElementById('onboarding').style.display = 'none';
-            localStorage.setItem('echoRift_onboardingCompleted', 'true');
-            game.restartRun();
+        if (e.target.classList.contains('skip-tutorial') || e.target.id === 'onboarding-skip-all') {
+            beginRun();
+        }
+        if (e.target.id === 'onboarding-next') {
+            advanceOnboarding(1);
+        }
+        if (e.target.id === 'title-play-btn') {
+            document.getElementById('title-screen').style.display = 'none';
+            openOnboarding();
+        }
+        if (e.target.id === 'title-howto-btn') {
+            document.getElementById('title-screen').style.display = 'none';
+            openOnboarding();
         }
         
         // Pause menu
@@ -35,28 +112,24 @@ function setUpEventListeners() {
             game.gameplayStart();
         }
         if (e.target.id === 'stats-btn') {
-            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('pause-menu').style.display = 'none';
+            statScreenMode = 'paused';
             renderStatScreen();
-            const statScreen = document.getElementById('stat-screen');
-            if (statScreen) statScreen.style.display = 'block';
         }
         if (e.target.id === 'settings-btn') {
-            toggleSettings();
+            settingsOpenedFromPause = true;
+            openSettings();
         }
-        if (e.target.id === 'restart-btn') {
+        if (e.target.id === 'restart-btn' || e.target.id === 'restart-btn2') {
+            closeStatScreen();
             game.restartRun();
         }
-        if (e.target.id === 'quit-btn') {
-            quitToTitle();
-        }
-        if (e.target.id === 'restart-btn2') {
-            game.restartRun();
-        }
-        if (e.target.id === 'main-menu-btn') {
+        if (e.target.id === 'quit-btn' || e.target.id === 'main-menu-btn') {
+            closeStatScreen();
             quitToTitle();
         }
         if (e.target.id === 'close-settings-btn') {
-            document.getElementById('settings-panel').style.display = 'none';
+            closeSettings();
         }
     });
 
@@ -71,28 +144,45 @@ function setUpEventListeners() {
         masterVol.addEventListener('input', (e) => {
             const value = parseFloat(e.target.value);
             audio.setMasterVolume(value);
-            game.saveGameSettings({ ...game.loadGameSettings(), masterVolume: value });
+            persistGameSettings({ masterVolume: value });
         });
     }
     if (sfxVol) {
         sfxVol.addEventListener('input', (e) => {
             const value = parseFloat(e.target.value);
             audio.setSFXVolume(value);
-            game.saveGameSettings({ ...game.loadGameSettings(), sfxVolume: value });
+            persistGameSettings({ sfxVolume: value });
+        });
+    }
+    const particleQuality = document.getElementById('particle-quality');
+    const screenShake = document.getElementById('screen-shake');
+    const settings = game.loadGameSettings();
+    if (particleQuality) {
+        particleQuality.value = settings.particleQuality || 'medium';
+        particleQuality.addEventListener('change', (e) => {
+            persistGameSettings({ particleQuality: e.target.value });
+            game.applyGameSettings(game.loadGameSettings());
+        });
+    }
+    if (screenShake) {
+        screenShake.checked = settings.screenShake !== false;
+        screenShake.addEventListener('change', (e) => {
+            persistGameSettings({ screenShake: e.target.checked });
+            game.applyGameSettings(game.loadGameSettings());
         });
     }
     
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         // Number keys 1-12 for quick stat allocation while stat screen is open
-        const statScreen = document.getElementById('stat-screen');
+        const statScreen = document.getElementById('stat-screen-container');
         if (statScreen && statScreen.style.display === 'block') {
             const num = parseInt(e.key);
             if (num >= 1 && num <= 12) {
                 const keys = ['hp', 'hpRegen', 'moveSpeed', 'attackPower', 'attackSpeed', 'attackRange', 'criticalChance', 'criticalDamage', 'echoPower', 'echoDuration', 'echoCooldown', 'fragmentMagnet'];
-                if (keys[num - 1]) {
-                    upgradeSystem.addPoint(keys[num - 1]);
+                if (keys[num - 1] && upgradeSystem.addPoint(keys[num - 1])) {
                     game.applyPlayerStats();
+                    audio.play('stat-upgrade');
                     renderStatScreen();
                 }
             }
@@ -100,19 +190,65 @@ function setUpEventListeners() {
     });
 }
 
-// Update HUD display
+function openOnboarding() {
+    const onboarding = document.getElementById('onboarding');
+    const wizard = document.getElementById('onboarding-wizard');
+    if (wizard) wizard.style.display = 'flex';
+    if (onboarding) onboarding.style.display = 'flex';
+    initOnboardingWizard();
+}
+
+function advanceOnboarding(delta) {
+    const screens = [...document.querySelectorAll('#onboarding .onboarding-screen')];
+    let current = screens.findIndex((s) => s.style.display !== 'none');
+    if (current < 0) current = 0;
+    const next = current + delta;
+    if (next >= screens.length) {
+        beginRun();
+        return;
+    }
+    screens.forEach((s, i) => { s.style.display = i === next ? 'block' : 'none'; });
+    const stepLabel = document.getElementById('onboarding-step');
+    if (stepLabel) stepLabel.textContent = `${next + 1} / ${screens.length}`;
+}
+
 function updateHUD() {
+    const state = game.gameState;
+
     // Level
-    document.getElementById('level-display').textContent = `Lv. ${game.gameState.level}`;
-    
+    setText('level-display', `Lv. ${state.level}`);
+
+    // Health
+    const hpRatio = player.maxHP > 0 ? Math.max(0, player.hp / player.maxHP) : 0;
+    const hpFill = document.getElementById('hp-bar-fill');
+    if (hpFill) {
+        hpFill.style.width = Math.min(hpRatio * 100, 100) + '%';
+        hpFill.classList.toggle('low', hpRatio <= 0.34);
+    }
+    setText('hp-text', `${Math.ceil(Math.max(0, player.hp))} / ${player.maxHP} HP`);
+
     // XP
-    const percent = game.gameState.xp / game.gameState.xpRequired;
+    const percent = state.xp / state.xpRequired;
     const xpBar = document.getElementById('xp-bar-fill');
-    xpBar.style.width = Math.min(percent * 100, 100) + '%';
-    document.getElementById('xp-text').textContent = `${Math.floor(game.gameState.xp)} / ${game.gameState.xpRequired} XP`;
-    
+    if (xpBar) xpBar.style.width = Math.min(percent * 100, 100) + '%';
+    setText('xp-text', `${Math.floor(state.xp)} / ${state.xpRequired} XP`);
+
+    // Run readouts
+    setText('wave-display', `Wave ${game.getCurrentWave()}`);
+    setText('time-display', game.formatTime(game.getRunTime()));
+    setText('best-display', `Best ${game.formatTime(saveSystem.saveData.bestTime || 0)}`);
+
     // Echo Shift indicator
     updateEchoShiftIndicator();
+}
+
+const hudCache = new Map();
+function setText(id, value) {
+    if (hudCache.get(id) === value) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value;
+    hudCache.set(id, value);
 }
 
 // Render the stat screen
@@ -205,15 +341,20 @@ function renderStatScreen() {
     container.innerHTML = html;
     container.style.display = 'block';
     
-    // Add click listeners for continue button
-    document.getElementById('continue-btn').addEventListener('click', () => {
-        container.style.display = 'none';
-        container.innerHTML = '';
-        if (game.gameState && game.gameState.isPaused && document.getElementById('game-over').style.display !== 'block') {
-            // Resume gameplay
-            game.gameplayStart();
-        }
-    });
+    // Opening the stat screen from the pause menu must stop the run too, so the
+    // portal is told gameplay ended while the player is allocating points.
+    if (statScreenMode === 'paused') game.gameplayStop();
+}
+
+function closeStatScreenAndResume() {
+    const mode = statScreenMode;
+    closeStatScreen();
+    if (mode === 'levelUp') {
+        game.closeStatAllocation();
+    } else {
+        // Opened from the pause menu: gameplayStop() paused the run, so resume
+        game.gameplayStart();
+    }
 }
 
 function calculateBonus(statKey, points) {
@@ -255,93 +396,62 @@ function updateEchoShiftIndicator() {
     
     const lastUsed = game.echoShift ? game.echoShift.lastUsed : 0;
     const cooldown = game.echoShift ? game.echoShift.cooldown : 15.0;
-    const currentTime = performance.now() / 1000;
-    const timeSinceUsed = currentTime - lastUsed;
+    const timeSinceUsed = game.getRunTime() - lastUsed;
     const remainingCooldown = Math.max(0, cooldown - timeSinceUsed);
     
-    if (game.gameState.isPaused || document.getElementById('game-over').style.display === 'block') {
+    if (!game.echoShift || game.gameState.isPaused || game.gameState.statAllocationOpen
+        || document.getElementById('game-over').style.display === 'block'
+        || document.getElementById('onboarding').style.display !== 'none') {
         indicator.style.display = 'none';
         return;
     }
     
     indicator.style.display = 'block';
     
-    if (remainingCooldown > 0.5) {
+    if (remainingCooldown > 0.05) {
         cooldownText.textContent = remainingCooldown.toFixed(1) + 's';
         shiftText.textContent = 'ECHO SHIFT: ' + remainingCooldown.toFixed(1) + 's';
     } else {
         cooldownText.textContent = 'READY';
         shiftText.textContent = 'ECHO SHIFT: READY';
-        
-        // Hide after a moment if ready
-        setTimeout(() => {
-            indicator.style.display = 'none';
-        }, 1000);
     }
-}
-
-// Show game over screen
-function showGameOverScreen() {
-    const survivalSeconds = Math.floor((game.gameState.secondsSinceStart - game.gameState.timePaused) || 0);
-    const minutes = Math.floor(survivalSeconds / 60);
-    const secs = survivalSeconds % 60;
-    
-    const gameOverContainer = document.getElementById('game-over');
-    if (!gameOverContainer) return;
-
-    // Update text content of existing spans
-    document.getElementById('survival-time').textContent = `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
-    document.getElementById('enemies-defeated').textContent = game.gameState.enemiesDefeated;
-    document.getElementById('fragments-collected').textContent = game.gameState.fragmentsCollected;
-    document.getElementById('level-reached').textContent = game.gameState.level;
-
-    const finalStats = document.getElementById('final-stats');
-    if (finalStats) {
-        document.getElementById('damage-dealt').textContent = Math.floor(game.gameState.damageDealt);
-        document.getElementById('echo-damage').textContent = Math.floor(game.gameState.echoDamageDealt);
-        document.getElementById('stat-points-spent').textContent = game.gameState.statPointsSpent;
-        finalStats.style.display = 'block';
-    }
-
-    gameOverContainer.style.display = 'block';
-    // Event listeners are already on the buttons in index.html and setupEventListeners
 }
 
 function quitToTitle() {
-    document.getElementById('onboarding').style.display = 'block';
+    game.gameplayStop();
     document.getElementById('game-over').style.display = 'none';
     document.getElementById('pause-menu').style.display = 'none';
-    const statScreen = document.getElementById('stat-screen-container');
-    if (statScreen) {
-        statScreen.style.display = 'none';
-        statScreen.innerHTML = '';
-    }
-    // Reset some state (gameState is a read-only namespace binding - mutate instead of reassign)
+    document.getElementById('settings-panel').style.display = 'none';
+    closeStatScreen();
+    const title = document.getElementById('title-screen');
+    const wizard = document.getElementById('onboarding-wizard');
+    if (title) title.style.display = 'flex';
+    if (wizard) wizard.style.display = 'none';
+    document.getElementById('onboarding').style.display = 'none';
     if (game.gameState) {
-        Object.assign(game.gameState, {
-            level: 1,
-            xp: 0,
-            xpRequired: 100,
-            statPoints: 0,
-            highestLevel: 1,
-            bestSurvivalTime: 0,
-            enemiesDefeated: 0,
-            fragmentsCollected: 0,
-            damageDealt: 0,
-            echoDamageDealt: 0,
-            statPointsSpent: 0,
-            runStartTime: 0,
-            timePaused: 0,
-            secondsSinceStart: 0,
-            isPaused: false
-        });
+        game.gameState.isPaused = true;
+        game.gameState.statAllocationOpen = false;
+        // Records live in the save, not in the abandoned run
+        game.gameState.highestLevel = saveSystem.saveData.highestLevel || 1;
+        game.gameState.bestSurvivalTime = saveSystem.saveData.bestTime || 0;
     }
+    refreshTitleBest();
 }
 
 // Settings panel
-function toggleSettings() {
+let settingsOpenedFromPause = false;
+
+export function openSettings() {
     const panel = document.getElementById('settings-panel');
-    if (panel) {
-        panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+    if (panel) panel.style.display = 'flex';
+}
+
+export function closeSettings() {
+    const panel = document.getElementById('settings-panel');
+    if (panel) panel.style.display = 'none';
+    // Return to the pause menu instead of dropping the player into a paused run
+    if (settingsOpenedFromPause) {
+        settingsOpenedFromPause = false;
+        document.getElementById('pause-menu').style.display = 'block';
     }
 }

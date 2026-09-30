@@ -7,6 +7,8 @@ let platformMuted = false;
 const isMuted = () => userMuted || platformMuted;
 let masterVolume = 0.7;
 let sfxVolume = 0.7;
+let bgmNodes = null;
+let bgmPlaying = false;
 
 // Check if CrazyGames SDK wants audio muted
 // Initialize audio context (must be resumed by user gesture)
@@ -92,8 +94,26 @@ export function play(name) {
                 frequency = 110;
                 duration = 1.0;
                 type = 'sine';
-                // Rising frequency
-                break;
+                oscillator.type = type;
+                oscillator.frequency.setValueAtTime(110, audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + duration);
+                gainNode.gain.setValueAtTime(sfxVolume * masterVolume * 0.5, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+                return;
+            case 'wave':
+                frequency = 330;
+                duration = 0.35;
+                type = 'triangle';
+                oscillator.type = type;
+                oscillator.frequency.setValueAtTime(330, audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(660, audioContext.currentTime + duration);
+                gainNode.gain.setValueAtTime(sfxVolume * masterVolume * 0.45, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+                return;
             default:
                 return;
         }
@@ -112,7 +132,7 @@ export function play(name) {
 // Set volumes
 export function setMasterVolume(volume) {
     masterVolume = Math.max(0, Math.min(1, volume));
-    // Apply to audio context if possible
+    updateBGMVolume();
 }
 
 export function setSFXVolume(volume) {
@@ -133,9 +153,54 @@ export function setMuted(muted) {
 export function setPlatformMuted(muted) {
     platformMuted = !!muted;
     if (audioContext) {
-        if (isMuted()) audioContext.suspend();
-        else audioContext.resume().catch(() => {});
+        if (isMuted()) {
+            audioContext.suspend();
+            stopBGM();
+        } else {
+            audioContext.resume().catch(() => {});
+        }
     }
+}
+
+export function startBGM() {
+    if (isMuted() || bgmPlaying) return;
+    if (!audioContext && !initAudioContext()) return;
+    stopBGM();
+    try {
+        const osc1 = audioContext.createOscillator();
+        const osc2 = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        const filter = audioContext.createBiquadFilter();
+        osc1.type = 'sine';
+        osc2.type = 'triangle';
+        osc1.frequency.value = 55;
+        osc2.frequency.value = 110;
+        filter.type = 'lowpass';
+        filter.frequency.value = 400;
+        gain.gain.value = masterVolume * 0.08;
+        osc1.connect(filter);
+        osc2.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioContext.destination);
+        osc1.start();
+        osc2.start();
+        bgmNodes = { osc1, osc2, gain };
+        bgmPlaying = true;
+    } catch { /* ignore */ }
+}
+
+export function stopBGM() {
+    if (!bgmNodes) return;
+    try {
+        bgmNodes.osc1.stop();
+        bgmNodes.osc2.stop();
+    } catch { /* ignore */ }
+    bgmNodes = null;
+    bgmPlaying = false;
+}
+
+export function updateBGMVolume() {
+    if (bgmNodes?.gain) bgmNodes.gain.gain.value = masterVolume * 0.08;
 }
 
 // Audio context creation is deferred until a user gesture.

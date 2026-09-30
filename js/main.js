@@ -1,17 +1,19 @@
 // Main entry point - game bootstrap and state management
-import { initGame, update as gameUpdate, echoShift } from './game.js';
+import { initGame, update as gameUpdate, echoShift, getRunTime, gameplayStart, gameplayStop } from './game.js';
 import { player } from './player.js';
 import { resetAll as resetEnemies, getActiveEnemies } from './enemies.js';
 import { ui } from './ui.js';
 import { saveSystem } from './save.js';
 import { initAudioContext } from './audio.js';
 import * as visualEffects from './visual-effects.js';
+import * as fragments from './fragments.js';
 import { crazyGames } from './crazygames.js';
 
 // Game state
-let gameState = 'onboarding'; // onboarding, playing, paused, game-over
+let gameState = 'title'; // title, onboarding, playing, paused, game-over
 let lastTimestamp = 0;
 let deltaTime = 0;
+let hudTickAccumulator = 0;
 
 
 export const keysDown = new Set();
@@ -58,9 +60,16 @@ function syncStateFromDOM() {
     
     if (visible('game-over')) {
         gameState = 'game-over';
+    } else if (visible('title-screen')) {
+        gameState = 'title';
     } else if (visible('onboarding')) {
         gameState = 'onboarding';
-    } else if (visible('stat-screen') || visible('pause-menu')) {
+    } else if (visible('settings-panel')) {
+        gameState = 'settings';
+    } else if (visible('stat-screen-container')) {
+        // Checked before the pause menu so a stat screen always wins
+        gameState = 'stat-screen';
+    } else if (visible('pause-menu')) {
         gameState = 'paused';
     } else {
         gameState = 'playing';
@@ -85,6 +94,15 @@ function gameLoop(timestamp) {
         player.update(deltaTime, keysDown, joystickVector);
         visualEffects.update(deltaTime);
         gameUpdate(deltaTime);
+        hudTickAccumulator += deltaTime;
+        if (hudTickAccumulator >= 0.1) {
+            ui.tickHUD();
+            hudTickAccumulator %= 0.1;
+        }
+    } else {
+        // Held movement keys must not leak across pause, death, or menus
+        keysDown.clear();
+        joystickVector.x = joystickVector.y = 0;
     }
     
     render();
@@ -93,20 +111,310 @@ function gameLoop(timestamp) {
 }
 
 // Original procedural neon arena renderer.
-function render(){
- const c=document.getElementById('game-canvas');if(!c)return;const x=c.getContext('2d');if(!x)return;const w=c.width,h=c.height,t=performance.now()/1000,es=getActiveEnemies(),ax=38,ay=34,aw=w-76,ah=h-68;
- const g=x.createLinearGradient(0,0,w,h);g.addColorStop(0,'#080b19');g.addColorStop(.5,'#11152d');g.addColorStop(1,'#080b18');x.fillStyle=g;x.fillRect(0,0,w,h);
- const glow=x.createRadialGradient(w*.52,h*.48,10,w*.52,h*.48,w*.65);glow.addColorStop(0,'rgba(45,50,110,.14)');glow.addColorStop(1,'rgba(5,7,18,0)');x.fillStyle=glow;x.fillRect(0,0,w,h);
- for(let i=0;i<82;i++){x.fillStyle=`rgba(164,197,255,${.2+(Math.sin(t*1.5+i*8)+1)*.18})`;x.fillRect(i*137.51%w,i*79.17%h,i%9===0?2:1,i%9===0?2:1)}
- x.save();x.beginPath();x.rect(ax,ay,aw,ah);x.clip();x.strokeStyle='rgba(69,142,211,.09)';x.lineWidth=1;for(let a=ax;a<ax+aw;a+=32){x.beginPath();x.moveTo(a,ay);x.lineTo(a,ay+ah);x.stroke()}for(let a=ay;a<ay+ah;a+=32){x.beginPath();x.moveTo(ax,a);x.lineTo(ax+aw,a);x.stroke()}x.restore();
- x.strokeStyle='rgba(100,166,230,.17)';x.strokeRect(ax,ay,aw,ah);x.strokeStyle='rgba(83,217,255,.48)';x.lineWidth=2;[[ax,ay,1,1],[ax+aw,ay,-1,1],[ax,ay+ah,1,-1],[ax+aw,ay+ah,-1,-1]].forEach(([a,b,d,e])=>{x.beginPath();x.moveTo(a+d*18,b);x.lineTo(a,b);x.lineTo(a,b+e*18);x.stroke()});
- if(echoShift?.isActive&&echoShift.path.length>1){const p=echoShift.path;x.save();x.lineCap='round';x.beginPath();x.moveTo(p[0].x,p[0].y);for(let i=1;i<p.length;i++)x.lineTo(p[i].x,p[i].y);x.shadowColor='#36eaff';x.shadowBlur=14;x.strokeStyle='rgba(31,221,255,.24)';x.lineWidth=15;x.stroke();x.shadowBlur=6;x.strokeStyle='rgba(79,222,235,.76)';x.lineWidth=3;x.stroke();x.shadowBlur=0;x.strokeStyle='rgba(210,239,242,.75)';x.lineWidth=1;x.stroke();for(let i=0;i<p.length;i+=5){x.fillStyle='#80f5ff';x.beginPath();x.arc(p[i].x,p[i].y,2+Math.sin(t*8+i),0,Math.PI*2);x.fill()}x.restore()}
- for(const e of es){const r=e.size*(.92+Math.sin(t*3+e.id)*.08),n=e.type==='shardling'?4:(e.type==='rift_warden'||e.type==='rift_core'?8:6);x.save();x.translate(e.x,e.y);x.rotate(t*(e.type==='charger'?1.2:.25)+e.id);x.shadowColor=e.color;x.shadowBlur=e.type==='rift_warden'?14:8;x.fillStyle=`${e.color}30`;x.strokeStyle=e.color;x.lineWidth=2;x.beginPath();for(let i=0;i<n;i++){const a=i*Math.PI*2/n,rr=r*(i%2===0?1:.77),px=Math.cos(a)*rr,py=Math.sin(a)*rr;i?x.lineTo(px,py):x.moveTo(px,py)}x.closePath();x.fill();x.stroke();if(e.hitFlashUntil>t){x.globalAlpha=.78;x.fillStyle='#e9ffff';x.fill();x.globalAlpha=1}x.shadowBlur=0;x.fillStyle=e.color;x.beginPath();x.arc(0,0,Math.max(3,r*.23),0,Math.PI*2);x.fill();x.restore();if(e.hp<e.maxHP||e.type==='rift_warden'||e.type==='rift_core'){const bw=Math.max(30,r*2),q=Math.max(0,e.hp/e.maxHP);x.fillStyle='#050914';x.fillRect(e.x-bw/2,e.y-r-12,bw,4);x.fillStyle=q<.3?'#ff8b87':'#70f4d1';x.fillRect(e.x-bw/2,e.y-r-12,bw*q,4)}}
- x.save();x.beginPath();x.arc(player.x,player.y,player.attackRange,0,Math.PI*2);x.fillStyle='rgba(143,126,255,.035)';x.fill();x.setLineDash([7,7]);x.lineWidth=2;x.strokeStyle='rgba(178,157,220,.42)';x.shadowColor='#a98aff';x.shadowBlur=6;x.stroke();x.setLineDash([]);x.shadowBlur=0;x.lineWidth=1;x.strokeStyle='rgba(225,213,255,.25)';x.beginPath();x.arc(player.x,player.y,player.attackRange-4,0,Math.PI*2);x.stroke();x.restore();
- const target=es.reduce((best,e)=>Math.hypot(e.x-player.x,e.y-player.y)<player.attackRange&&(!best||Math.hypot(e.x-player.x,e.y-player.y)<Math.hypot(best.x-player.x,best.y-player.y))?e:best,null);if(target&&t-player.lastAttackTime<.13){x.save();x.globalAlpha=1-(t-player.lastAttackTime)/.13;x.shadowColor='#81f7ff';x.shadowBlur=18;x.strokeStyle='#acffff';x.lineWidth=2;x.beginPath();x.moveTo(player.x,player.y);x.lineTo(target.x,target.y);x.stroke();x.restore()}
- x.save();x.translate(player.x,player.y+Math.sin(t*4));const pg=x.createRadialGradient(0,0,2,0,0,36);pg.addColorStop(0,'rgba(56,155,170,.22)');pg.addColorStop(1,'rgba(71,205,220,0)');x.fillStyle=pg;x.beginPath();x.arc(0,0,36,0,Math.PI*2);x.fill();x.rotate(t*.55);x.strokeStyle='rgba(106,195,205,.42)';x.lineWidth=1.4;x.beginPath();x.ellipse(0,0,23,9,.35,0,Math.PI*2);x.stroke();x.rotate(-t*1.1);x.strokeStyle='rgba(150,125,200,.4)';x.beginPath();x.ellipse(0,0,22,8,-.48,0,Math.PI*2);x.stroke();x.shadowColor='#34c4d2';x.shadowBlur=6;x.fillStyle='#31aebb';x.strokeStyle='#8ec6ca';x.lineWidth=1.5;x.beginPath();x.moveTo(0,-15);x.lineTo(11,-5);x.lineTo(8,10);x.lineTo(0,15);x.lineTo(-8,10);x.lineTo(-11,-5);x.closePath();x.fill();x.stroke();x.shadowBlur=0;x.fillStyle='#b9d9dc';x.beginPath();x.arc(0,0,4.5,0,Math.PI*2);x.fill();x.restore();
- visualEffects.render(x, t);
- const hp=Math.max(0,player.hp/player.maxHP),bw=42;x.fillStyle='rgba(3,7,17,.9)';x.fillRect(player.x-bw/2-2,player.y-31,bw+4,5);x.fillStyle=hp>.3?'#72f4d1':'#ff8278';x.fillRect(player.x-bw/2,player.y-30,bw*hp,3)
+function render() {
+    const canvas = document.getElementById('game-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const t = performance.now() / 1000;
+    const enemies = getActiveEnemies();
+    const shake = visualEffects.getScreenShakeOffset(t);
+
+    ctx.save();
+    ctx.translate(shake.x, shake.y);
+    drawArena(ctx, canvas.width, canvas.height, t);
+    fragments.render(ctx, t);
+    drawEchoTrail(ctx, t);
+    for (const enemy of enemies) drawEnemy(ctx, enemy, t);
+    drawPlayerAura(ctx, t);
+    drawAttackLine(ctx, enemies, t);
+    drawPlayer(ctx, t);
+    drawEchoCooldownRing(ctx, t);
+    drawPlayerHealthBar(ctx);
+    visualEffects.render(ctx, t);
+    if (shake.x || shake.y) drawHurtVignette(ctx, canvas.width, canvas.height);
+    ctx.restore();
+}
+
+function drawArena(ctx, w, h, t) {
+    const ax = 38, ay = 34, aw = w - 76, ah = h - 68;
+
+    const backdrop = ctx.createLinearGradient(0, 0, w, h);
+    backdrop.addColorStop(0, '#080b19');
+    backdrop.addColorStop(.5, '#11152d');
+    backdrop.addColorStop(1, '#080b18');
+    ctx.fillStyle = backdrop;
+    ctx.fillRect(0, 0, w, h);
+
+    const glow = ctx.createRadialGradient(w * .52, h * .48, 10, w * .52, h * .48, w * .65);
+    glow.addColorStop(0, 'rgba(45,50,110,.14)');
+    glow.addColorStop(1, 'rgba(5,7,18,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h);
+
+    for (let i = 0; i < 82; i++) {
+        ctx.fillStyle = `rgba(164,197,255,${.2 + (Math.sin(t * 1.5 + i * 8) + 1) * .18})`;
+        ctx.fillRect(i * 137.51 % w, i * 79.17 % h, i % 9 === 0 ? 2 : 1, i % 9 === 0 ? 2 : 1);
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ax, ay, aw, ah);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(69,142,211,.09)';
+    ctx.lineWidth = 1;
+    for (let a = ax; a < ax + aw; a += 32) { ctx.beginPath(); ctx.moveTo(a, ay); ctx.lineTo(a, ay + ah); ctx.stroke(); }
+    for (let a = ay; a < ay + ah; a += 32) { ctx.beginPath(); ctx.moveTo(ax, a); ctx.lineTo(ax + aw, a); ctx.stroke(); }
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(100,166,230,.17)';
+    ctx.strokeRect(ax, ay, aw, ah);
+    ctx.strokeStyle = 'rgba(83,217,255,.48)';
+    ctx.lineWidth = 2;
+    for (const [cx, cy, dx, dy] of [[ax, ay, 1, 1], [ax + aw, ay, -1, 1], [ax, ay + ah, 1, -1], [ax + aw, ay + ah, -1, -1]]) {
+        ctx.beginPath();
+        ctx.moveTo(cx + dx * 18, cy);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx, cy + dy * 18);
+        ctx.stroke();
+    }
+}
+
+// Only the swept part of the frozen path is drawn, so the player can read the
+// damage front as it travels.
+function drawEchoTrail(ctx, t) {
+    if (!echoShift?.isActive || !echoShift.path || echoShift.path.length < 2) return;
+    const path = echoShift.path;
+    const idx = Math.min(path.length - 1, Math.floor((echoShift.replayProgress || 0) * (path.length - 1)));
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i <= idx; i++) ctx.lineTo(path[i].x, path[i].y);
+    if (echoShift.headX !== undefined) ctx.lineTo(echoShift.headX, echoShift.headY);
+
+    ctx.shadowColor = '#36eaff';
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = 'rgba(31,221,255,.24)';
+    ctx.lineWidth = 15;
+    ctx.stroke();
+    ctx.shadowBlur = 6;
+    ctx.strokeStyle = 'rgba(79,222,235,.76)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(210,239,242,.75)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#b8ffff';
+    ctx.shadowColor = '#36eaff';
+    ctx.shadowBlur = 16;
+    ctx.beginPath();
+    ctx.arc(echoShift.headX ?? path[0].x, echoShift.headY ?? path[0].y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawEnemy(ctx, e, t) {
+    const r = e.size * (.92 + Math.sin(t * 3 + e.id) * .08);
+    const sides = e.type === 'shardling' ? 4 : (e.type === 'rift_warden' || e.type === 'rift_core' ? 8 : 6);
+    const windingUp = e.aiState === 'rush_windup';
+
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.rotate(t * (e.type === 'charger' ? 1.2 : .25) + e.id);
+    ctx.shadowColor = e.color;
+    ctx.shadowBlur = windingUp ? 20 : (e.type === 'rift_warden' ? 14 : 8);
+    ctx.fillStyle = `${e.color}30`;
+    ctx.strokeStyle = windingUp ? '#fff3d6' : e.color;
+    ctx.lineWidth = windingUp ? 3 : 2;
+    ctx.beginPath();
+    for (let i = 0; i < sides; i++) {
+        const a = i * Math.PI * 2 / sides;
+        const rr = r * (i % 2 === 0 ? 1 : .77);
+        const px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+        if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    if (e.hitFlashUntil > t) {
+        ctx.globalAlpha = .78;
+        ctx.fillStyle = '#e9ffff';
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = e.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(3, r * .23), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    if (e.hp < e.maxHP || e.type === 'rift_warden' || e.type === 'rift_core') {
+        const bw = Math.max(30, r * 2);
+        const q = Math.max(0, e.hp / e.maxHP);
+        ctx.fillStyle = '#050914';
+        ctx.fillRect(e.x - bw / 2, e.y - r - 12, bw, 4);
+        ctx.fillStyle = q < .3 ? '#ff8b87' : '#70f4d1';
+        ctx.fillRect(e.x - bw / 2, e.y - r - 12, bw * q, 4);
+    }
+}
+
+function drawPlayerAura(ctx, t) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.attackRange, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(143,126,255,.035)';
+    ctx.fill();
+    ctx.setLineDash([7, 7]);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(178,157,220,.42)';
+    ctx.shadowColor = '#a98aff';
+    ctx.shadowBlur = 6;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(225,213,255,.25)';
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.attackRange - 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawAttackLine(ctx, enemies, t) {
+    let target = null;
+    let best = Infinity;
+    for (const enemy of enemies) {
+        const d = Math.hypot(enemy.x - player.x, enemy.y - player.y);
+        if (d < player.attackRange && d < best) { best = d; target = enemy; }
+    }
+    if (!target || t - player.lastAttackTime >= .13) return;
+
+    ctx.save();
+    ctx.globalAlpha = 1 - (t - player.lastAttackTime) / .13;
+    ctx.shadowColor = '#81f7ff';
+    ctx.shadowBlur = 18;
+    ctx.strokeStyle = '#acffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(player.x, player.y);
+    ctx.lineTo(target.x, target.y);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawPlayer(ctx, t) {
+    ctx.save();
+    ctx.translate(player.x, player.y + Math.sin(t * 4));
+
+    const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, 36);
+    aura.addColorStop(0, 'rgba(56,155,170,.22)');
+    aura.addColorStop(1, 'rgba(71,205,220,0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(0, 0, 36, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.rotate(t * .55);
+    ctx.strokeStyle = 'rgba(106,195,205,.42)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 23, 9, .35, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.rotate(-t * 1.1);
+    ctx.strokeStyle = 'rgba(150,125,200,.4)';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 22, 8, -.48, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // i-frame blink: the body dims while invulnerable after a hit
+    if (performance.now() / 1000 < player.invulnUntil) {
+        ctx.globalAlpha = 0.55;
+    }
+    ctx.shadowColor = '#34c4d2';
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = '#31aebb';
+    ctx.strokeStyle = '#8ec6ca';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -15);
+    ctx.lineTo(11, -5);
+    ctx.lineTo(8, 10);
+    ctx.lineTo(0, 15);
+    ctx.lineTo(-8, 10);
+    ctx.lineTo(-11, -5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // hurt flash on the core, so contact damage is readable
+    if (performance.now() / 1000 < player.hurtFlashUntil) {
+        ctx.fillStyle = '#ff9c9c';
+    } else {
+        ctx.fillStyle = '#b9d9dc';
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+// Persistent cooldown ring, so readiness is readable without looking at the HUD.
+function drawEchoCooldownRing(ctx, t) {
+    if (!echoShift) return;
+    const remaining = Math.max(0, echoShift.cooldown - (getRunTime() - echoShift.lastUsed));
+    if (remaining <= 0) {
+        const pulse = .35 + Math.sin(t * 3) * .12;
+        ctx.save();
+        ctx.strokeStyle = `rgba(105,239,255,${pulse})`;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 6]);
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, 24, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        return;
+    }
+
+    const ratio = Math.min(1, remaining / echoShift.cooldown);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,140,190,.28)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 24, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(182,154,255,.85)';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 24, -Math.PI / 2, -Math.PI / 2 + (1 - ratio) * Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawPlayerHealthBar(ctx) {
+    const ratio = Math.max(0, player.hp / player.maxHP);
+    const bw = 42;
+    ctx.fillStyle = 'rgba(3,7,17,.9)';
+    ctx.fillRect(player.x - bw / 2 - 2, player.y - 31, bw + 4, 5);
+    ctx.fillStyle = ratio > .3 ? '#72f4d1' : '#ff8278';
+    ctx.fillRect(player.x - bw / 2, player.y - 30, bw * ratio, 3);
+}
+
+function drawHurtVignette(ctx, w, h) {
+    const strength = Math.max(0, (player.hurtFlashUntil - performance.now() / 1000) / 0.2);
+    if (strength <= 0) return;
+    const vignette = ctx.createRadialGradient(w / 2, h / 2, h * .3, w / 2, h / 2, h * .78);
+    vignette.addColorStop(0, 'rgba(255,80,90,0)');
+    vignette.addColorStop(1, `rgba(255,70,84,${.42 * strength})`);
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, w, h);
 }
 // Handle keyboard input
 document.addEventListener('keydown', (e) => {
@@ -134,6 +442,15 @@ document.addEventListener('keydown', (e) => {
         if (lower === 'escape' || lower === 'p') {
             togglePause();
         }
+    } else if (gameState === 'stat-screen') {
+        // Escape continues the run instead of stacking the pause menu on the stat screen
+        if (lower === 'escape' || lower === 'p' || lower === 'enter') {
+            ui.continueFromStatScreen();
+        }
+    } else if (gameState === 'settings') {
+        if (lower === 'escape' || lower === 'p') {
+            ui.closeSettings();
+        }
     }
 });
 
@@ -150,16 +467,16 @@ document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         keysDown.clear();
         joystickVector.x = joystickVector.y = 0;
+        // Leaving the tab ends the run for the portal's gameplay tracking
+        syncStateFromDOM();
+        if (gameState === 'playing') togglePause();
     }
 });
 document.addEventListener('pointerdown', () => initAudioContext(), { passive: true });
 
 function handleOnboardingInput(key) {
     if (key === ' ' || key === 'Enter') {
-        document.getElementById('onboarding').style.display = 'none';
-        localStorage.setItem('echoRift_onboardingCompleted', 'true');
-        gameState = 'playing';
-        crazyGames.gameplayStart();
+        ui.beginRun();
     }
 }
 
@@ -180,13 +497,14 @@ function togglePause() {
     if (isPaused) {
         pauseMenu.style.display = 'none';
         gameState = 'playing';
-        crazyGames.gameplayStart();
+        // Resumes the run clock, BGM, and the portal timer together
+        gameplayStart();
     } else {
         pauseMenu.style.display = 'block';
         keysDown.clear();
         joystickVector.x = joystickVector.y = 0;
         gameState = 'paused';
-        crazyGames.gameplayStop();
+        gameplayStop();
     }
 }
 

@@ -45,20 +45,10 @@ export const upgradeSystem = {
     // Current stat points available
     availablePoints: 0,
     
+    // Stats are per-run: a run always starts from base values, and only
+    // lifetime records (time, level, kills) survive a reload.
     init() {
-        // Load saved points if any
-        const saved = localStorage.getItem('echoRift_stats');
-        if (saved) {
-            const data = JSON.parse(saved);
-            this.availablePoints = data.availablePoints || 0;
-            // Apply saved points to stats
-            for (const key of Object.keys(this.stats)) {
-                if (data.stats && data.stats[key] !== undefined) {
-                    this.stats[key].points = Math.max(0, data.stats[key].points || 0);
-                }
-            }
-        }
-        this.recalculateAllStats();
+        this.reset();
     },
     
     reset() {
@@ -67,9 +57,6 @@ export const upgradeSystem = {
             this.stats[key].points = 0;
         }
         this.recalculateAllStats();
-        try {
-            localStorage.removeItem('echoRift_stats');
-        } catch (e) {}
     },
     
     recalculateAllStats() {
@@ -146,22 +133,7 @@ export const upgradeSystem = {
     },
     
     spendStatPoint(statKey) {
-        if (this.availablePoints <= 0) return false;
-        if (!this.stats[statKey]) return false;
-        
-        // Spend a point
-        this.stats[statKey].points += 1;
-        this.availablePoints -= 1;
-        
-        // Recalculate stats
-        this.recalculateAllStats();
-        saveStats();
-        
-        import('./game.js').then(game => {
-            if (game.gameState) game.gameState.statPointsSpent++;
-        });
-        
-        return true;
+        return this.addPoint(statKey);
     },
     
     canSpendPoint(statKey) {
@@ -179,36 +151,14 @@ export const upgradeSystem = {
         this.availablePoints -= 1;
         
         this.recalculateAllStats();
-        saveStats();
         
-        import('./game.js').then(game => {
-            if (game.gameState) game.gameState.statPointsSpent++;
-        });
+        if (this.onPointSpent) this.onPointSpent(statKey);
         
         return true;
-    },
-    
-    save() {
-        try {
-            localStorage.setItem('echoRift_stats', JSON.stringify({
-                availablePoints: this.availablePoints,
-                stats: this.stats
-            }));
-        } catch (e) {
-            // Save failed - continue normally
-        }
     }
 };
 
-function saveStats() {
-    try {
-        upgradeSystem.save();
-    } catch (e) {
-        // Save failed - continue normally
-    }
-}
-
-// Initialize on load
+// Initialize from base values when the module loads
 upgradeSystem.init();
 
 // Export for use by other modules

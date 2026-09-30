@@ -1,9 +1,10 @@
 // Player entity - movement, stats, and Echo Shift mechanic
 import * as audio from './audio.js';
 import * as game from './game.js';
-import { spawnHit } from './visual-effects.js';
+import { spawnHit, triggerScreenShake } from './visual-effects.js';
 
 export const player = {
+    radius: 15,
     // Position and physics - initialized in game start
     x: 0,
     y: 0,
@@ -23,17 +24,20 @@ export const player = {
     echoDuration: 3.0, // Seconds
     echoCooldown: 15.0, // Seconds
     fragmentMagnetRange: 150, // Pixels
+    hpRegen: 0,
+    hurtFlashUntil: 0,
+    invulnUntil: 0,
     
     // Movement state
     isMoving: false,
     moveDirection: { x: 0, y: 0 }, // -1, 0, or 1
     
     // Echo Shift
-    movementHistory: [], // Circular buffer of {x, y, timestamp}
-    lastMoveTime: 0,
+    movementHistory: [], // Recent {x, y} records on the run clock
+    lastMoveTime: -Infinity,
     
     // Auto-attack
-    lastAttackTime: 0,
+    lastAttackTime: -Infinity,
     
     reset() {
         // Start in the center of the play area
@@ -43,7 +47,8 @@ export const player = {
         this.vx = 0;
         this.vy = 0;
         this.movementHistory = [];
-        this.lastAttackTime = 0;
+        this.lastMoveTime = -Infinity;
+        this.lastAttackTime = -Infinity;
     },
     
     update(deltaTime, keysDown, joystickVector) {
@@ -88,27 +93,24 @@ export const player = {
             this.hp = Math.min(this.maxHP, this.hp + this.hpRegen * deltaTime);
         }
         
-        // Record movement history for Echo Shift
-        if (this.isMoving && performance.now() / 1000 - this.lastMoveTime > 0.1) {
-            this.movementHistory.push({
-                x: this.x,
-                y: this.y,
-                timestamp: performance.now() / 1000
-            });
+        // Record movement history for Echo Shift (run clock, so pausing does
+        // not age the trail out)
+        const now = game.getRunTime();
+        if (this.isMoving && now - this.lastMoveTime > 0.1) {
+            this.movementHistory.push({ x: this.x, y: this.y, timestamp: now });
             // Keep only ~5 seconds of history
             if (this.movementHistory.length > 300) {
                 this.movementHistory.shift();
             }
-            this.lastMoveTime = performance.now() / 1000;
+            this.lastMoveTime = now;
         }
     },
     
     getMovementPath() {
         // Return a copy of the movement history for Echo Shift
-        // Filter to last 5 seconds
-        const now = performance.now() / 1000;
-        const fiveSecondsAgo = now - 5;
-        return this.movementHistory.filter(record => record.timestamp >= fiveSecondsAgo);
+        // Filter to last 5 seconds of run time
+        const cutoff = game.getRunTime() - 5;
+        return this.movementHistory.filter((record) => record.timestamp >= cutoff);
     },
     
     activateEchoShift() {
@@ -123,8 +125,14 @@ export const player = {
     },
     
     takeDamage(amount) {
+        const now = performance.now() / 1000;
+        if (now < this.invulnUntil) return;
+
         this.hp -= amount;
         if (this.hp < 0) this.hp = 0;
+        this.hurtFlashUntil = now + 0.2;
+        this.invulnUntil = now + 0.45;
+        triggerScreenShake(5, 0.14);
         
         // Play pain sound
         audio.play('player_damage');
@@ -145,7 +153,8 @@ export const player = {
     
     // Auto-attack: find nearest enemy within range and deal damage
     autoAttack(enemyList) {
-        if (performance.now() / 1000 - this.lastAttackTime < 1 / this.attackSpeed) return;
+        const now = performance.now() / 1000;
+        if (now - this.lastAttackTime < 1 / this.attackSpeed) return;
         
         let nearestEnemy = null;
         let nearestDistance = this.attackRange;

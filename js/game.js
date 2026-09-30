@@ -5,8 +5,8 @@ import { upgradeSystem } from './upgrades.js';
 import * as audio from './audio.js';
 import { crazyGames } from './crazygames.js';
 import { saveSystem } from './save.js';
-import { clear as clearVisualEffects } from './visual-effects.js';
-import { spawnHit } from './visual-effects.js';
+import { clear as clearVisualEffects, spawnHit, setParticleQuality, setScreenShakeEnabled } from './visual-effects.js';
+import * as fragments from './fragments.js';
 
 // Shared mutable state (read by ui.js/enemies.js/player.js via namespace import)
 export let gameState = null;
@@ -39,18 +39,16 @@ export function initGame() {
         damageDealt: 0,
         echoDamageDealt: 0,
         statPointsSpent: 0,
-        runStartTime: 0,
-        timePaused: 0,
         secondsSinceStart: 0,
-        isPaused: false
+        isPaused: false,
+        statAllocationOpen: false
     };
     
     // Initialize the player before input is accepted; otherwise the first update
     // clamps the default (0, 0) position to the arena corner.
     player.reset();
 
-    // Player stats (from upgrade system)
-    applyPlayerStats();
+    applyPlayerStats({ fullHeal: true });
     
     // Wave system
     currentWave = 1;
@@ -59,20 +57,35 @@ export function initGame() {
     maxEnemiesPerWave = 5;
     spawnTimer = 0;
     secondsSinceStart = 0;
+    pendingSpawns = 0;
+    bossWaveActive = false;
+    runEnded = false;
+    enemies.setWave(1);
     
     // Echo Shift
     echoShift = {
         isActive: false,
-        path: [], // Circular buffer of position records
-        startTime: 0,
+        path: [], // Frozen path replayed as a damage trail
+        startTime: 0, // Run-clock stamp of the activation
+        elapsed: 0, // Seconds replayed so far (drives the sweep)
         duration: 3.0, // Base echo duration in seconds
         cooldown: 15.0, // Base cooldown in seconds
-        lastUsed: -999 // Time since last use (negative = ready)
+        lastUsed: -999, // Run-clock stamp of the last use (negative = ready)
+        damagedEnemies: null,
+        replayProgress: 0,
+        replaySegmentIndex: 0,
+        replaySegmentT: 0,
+        headX: 0,
+        headY: 0
     };
     
+    loadGame();
+    fragments.resetAll();
+
     // UI updates
     updateLevelDisplay();
     updateXPBar();
+    updateUIStats();
 }
 
 // Game loop - called from main.js
@@ -82,6 +95,41 @@ let enemiesThisWave = 0;
 let maxEnemiesPerWave = 5;
 let spawnTimer = 0;
 let secondsSinceStart = 0;
+let pendingSpawns = 0;
+let bossWaveActive = false;
+let runEnded = false;
+
+export function getCurrentWave() {
+    return currentWave;
+}
+
+// Run clock: advances only while unpaused, so echo cooldowns, replays and the
+// movement trail all share one pausable timeline.
+export function getRunTime() {
+    return secondsSinceStart;
+}
+
+function distPointToSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const cx = x1 + t * dx;
+    const cy = y1 + t * dy;
+    return Math.hypot(px - cx, py - cy);
+}
+
+function placeEnemyAtEdge(enemy) {
+    if (Math.random() < 0.5) {
+        enemy.x = Math.random() * canvasWidth;
+        enemy.y = Math.random() < 0.5 ? -enemy.size : canvasHeight + enemy.size;
+    } else {
+        enemy.x = Math.random() < 0.5 ? -enemy.size : canvasWidth + enemy.size;
+        enemy.y = Math.random() * canvasHeight;
+    }
+}
 
 export function update(deltaTime) {
     if (!gameState || gameState.isPaused) return;
@@ -104,8 +152,20 @@ export function update(deltaTime) {
         }
     }
     
+    // Queued wave-opening spawns (drip-fed instead of setTimeout, so they cannot
+    // leak into a restarted or finished run)
+    if (pendingSpawns > 0) {
+        spawnTimer += deltaTime;
+        if (spawnTimer >= 0.5) {
+            spawnEnemy();
+            pendingSpawns--;
+            spawnTimer = 0;
+        }
+    }
+    
     // Update existing enemies
     enemies.updateAll(deltaTime);
+    fragments.updateAll(deltaTime);
     
     // Player auto-attack nearest enemy in range
     player.autoAttack(enemies.getActiveEnemies());
@@ -124,57 +184,82 @@ export function startNewWave() {
     currentWave++;
     maxEnemiesPerWave = Math.min(5 + Math.floor(currentWave / 3), 15); // Scale up to 15
     enemiesThisWave = 0;
-    
-    // Spawn initial enemies
-    for (let i = 0; i < Math.min(3 + currentWave % 4, 8); i++) {
-        setTimeout(spawnEnemy, i * 500);
+    bossWaveActive = currentWave % 10 === 0;
+    spawnTimer = 0;
+    enemies.setWave(currentWave);
+
+    if (bossWaveActive) {
+        pendingSpawns = 0;
+        spawnBoss();
+        audio.play('boss_warning');
+    } else {
+        pendingSpawns = Math.min(3 + currentWave % 4, 8);
     }
     
-    // UI update
-    const container = document.getElementById('wave-notice-container');
-    if (container) {
-        const notice = document.createElement('div');
-        notice.className = 'wave-notice';
-        notice.textContent = `Wave ${currentWave}`;
-        container.appendChild(notice);
-        setTimeout(() => notice.remove(), 3000);
-    }
-    
-    // Sound
+    showWaveNotice(bossWaveActive ? `BOSS — Wave ${currentWave}` : `Wave ${currentWave}`, bossWaveActive);
     audio.play('wave');
+}
+
+function showWaveNotice(text, isBoss) {
+    const container = document.getElementById('wave-notice-container');
+    if (!container) return;
+    const notice = document.createElement('div');
+    notice.className = isBoss ? 'wave-notice boss' : 'wave-notice';
+    notice.textContent = text;
+    container.appendChild(notice);
+    setTimeout(() => notice.remove(), 3200);
+}
+
+function spawnBoss() {
+    const boss = enemies.create('rift_core');
+    placeEnemyAtEdge(boss);
+    enemiesThisWave++;
 }
 
 export function spawnEnemy() {
     if (enemiesThisWave >= maxEnemiesPerWave) return;
-    
-    // Determine enemy type based on wave
+    if (bossWaveActive && enemies.getActiveEnemies().some((e) => e.type === 'rift_core')) {
+        return;
+    }
+
     let type;
-    if (currentWave % 5 === 0) {
-        type = 'rift_warden'; // Elite every 5 waves
-    } else if (currentWave >= 3 && Math.random() < 0.3) {
-        type = 'null_beast'; // High HP enemy
+    if (currentWave % 10 === 0 && !enemies.getActiveEnemies().some((e) => e.type === 'rift_core')) {
+        spawnBoss();
+        return;
+    }
+    if (currentWave % 5 === 0 && currentWave % 10 !== 0) {
+        type = 'rift_warden';
+    } else if (currentWave >= 4 && Math.random() < 0.12) {
+        type = 'echo_hunter';
+    } else if (currentWave >= 3 && Math.random() < 0.28) {
+        type = 'null_beast';
     } else if (currentWave >= 2) {
-        // Pick random basic type
         const types = ['drifter', 'charger', 'shardling'];
         type = types[Math.floor(Math.random() * types.length)];
     } else {
-        type = 'drifter'; // Basic enemy early on
+        type = 'drifter';
     }
-    
+
+    if (type === 'shardling') {
+        spawnShardlingPack();
+        return;
+    }
+
     const enemy = enemies.create(type);
-    
-    // Spawn from edges
-    if (Math.random() < 0.5) {
-        // Top or bottom
-        enemy.x = Math.random() * canvasWidth;
-        enemy.y = Math.random() < 0.5 ? -enemy.size : canvasHeight + enemy.size;
-    } else {
-        // Left or right
-        enemy.x = Math.random() < 0.5 ? -enemy.size : canvasWidth + enemy.size;
-        enemy.y = Math.random() * canvasHeight;
-    }
-    
+    placeEnemyAtEdge(enemy);
     enemiesThisWave++;
+}
+
+function spawnShardlingPack() {
+    const count = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i++) {
+        if (enemiesThisWave >= maxEnemiesPerWave) break;
+        const enemy = enemies.create('shardling');
+        placeEnemyAtEdge(enemy);
+        enemy.x += (Math.random() - 0.5) * 40;
+        enemy.y += (Math.random() - 0.5) * 40;
+        enemiesThisWave++;
+    }
 }
 
 export function checkLevelUp() {
@@ -184,22 +269,40 @@ export function checkLevelUp() {
 }
 
 export function levelUp() {
+    let leveled = false;
     while (gameState.xp >= gameState.xpRequired) {
         gameState.xp -= gameState.xpRequired;
         gameState.level++;
         gameState.highestLevel = Math.max(gameState.highestLevel, gameState.level);
         gameState.xpRequired = Math.floor(gameState.xpRequired * 1.5);
         
-        // Award stat points (from Level 2 onwards)
         upgradeSystem.addStatPoints(upgradeSystem.levelUpPoints);
         gameState.statPoints = upgradeSystem.getAvailablePoints();
-        
+        applyPlayerStats({ healOnLevelUp: true });
         audio.play('level-up');
+        leveled = true;
     }
     
     updateLevelDisplay();
     updateXPBar();
     saveGame();
+
+    if (leveled && !gameState.statAllocationOpen) {
+        openStatAllocation();
+    }
+}
+
+export function openStatAllocation() {
+    gameState.isPaused = true;
+    gameState.statAllocationOpen = true;
+    crazyGames.gameplayStop();
+    import('./ui.js').then((ui) => ui.openLevelUpStatScreen());
+}
+
+export function closeStatAllocation() {
+    gameState.statAllocationOpen = false;
+    gameState.isPaused = false;
+    crazyGames.gameplayStart();
 }
 
 export function checkGameOverState() {
@@ -210,25 +313,27 @@ export function checkGameOverState() {
 }
 
 export function endRun() {
+    if (runEnded) return; // Death can be detected from several places in one frame
+    runEnded = true;
     gameState.isPaused = true;
+    gameState.statAllocationOpen = false;
     
     // Update best stats
-    const survivalTime = (secondsSinceStart - gameState.timePaused).toFixed(0);
+    const survivalTime = getRunTime().toFixed(0);
     gameState.bestSurvivalTime = Math.max(gameState.bestSurvivalTime, parseInt(survivalTime));
-    
-    // Show game over UI
-    showGameOverScreen();
     
     // Call CrazyGames gameplay stop
     crazyGames.gameplayStop();
     
-    // Save best stats
+    // Save best stats before rendering, so the summary shows the record just set
     saveGame();
+    
+    // Show game over UI
+    showGameOverScreen();
 }
 
 export function addXP(amount) {
     gameState.xp += amount;
-    gameState.fragmentsCollected += Math.floor(amount / 10); // Fragments are ~10 XP each
     
     // Update UI
     updateXPBar();
@@ -238,6 +343,11 @@ export function addXP(amount) {
     
     // Sound
     audio.play('fragment');
+}
+
+export function addFragmentCollected(amount = 1) {
+    gameState.fragmentsCollected += amount;
+    updateUIStats();
 }
 
 export function addEchoDamage(amount) {
@@ -256,25 +366,17 @@ export function addEnemiesDefeated(amount = 1) {
 }
 
 export function loadGameSettings() {
-    try {
-        const saved = localStorage.getItem('echoRift_settings');
-        return saved ? { masterVolume: 0.7, sfxVolume: 0.7, particleQuality: 'medium', screenShake: true, ...JSON.parse(saved) } : { masterVolume: 0.7, sfxVolume: 0.7, particleQuality: 'medium', screenShake: true };
-    } catch {
-        return { masterVolume: 0.7, sfxVolume: 0.7, particleQuality: 'medium', screenShake: true };
-    }
+    return saveSystem.saveData?.settings
+        ? { ...saveSystem.saveData.settings }
+        : { masterVolume: 0.7, sfxVolume: 0.7, particleQuality: 'medium', screenShake: true };
 }
 
 export function saveGameSettings(settings) {
-    try {
-        localStorage.setItem('echoRift_settings', JSON.stringify(settings));
-    } catch (e) {
-        // Save failed - continue normally
-    }
+    saveSystem.updateSettings(settings);
 }
 
 export function applyGameSettings(settings) {
     if (!settings) return;
-    // Apply volume, particle quality, etc.
     if (settings.masterVolume !== undefined) {
         audio.setMasterVolume(settings.masterVolume);
     }
@@ -282,10 +384,10 @@ export function applyGameSettings(settings) {
         audio.setSFXVolume(settings.sfxVolume);
     }
     if (settings.particleQuality) {
-        // Adjust particle limits
+        setParticleQuality(settings.particleQuality);
     }
-    if (settings.screenShake) {
-        // Enable screen shake
+    if (settings.screenShake !== undefined) {
+        setScreenShakeEnabled(settings.screenShake);
     }
 }
 
@@ -301,29 +403,54 @@ export function updateXPBar() {
 }
 
 export function updateUIStats() {
-    document.getElementById('enemies-defeated').textContent = gameState.enemiesDefeated;
-    document.getElementById('fragments-collected').textContent = gameState.fragmentsCollected;
-    document.getElementById('damage-dealt').textContent = gameState.damageDealt;
-    document.getElementById('echo-damage').textContent = gameState.echoDamageDealt;
+    setText('enemies-defeated', gameState.enemiesDefeated);
+    setText('fragments-collected', gameState.fragmentsCollected);
+    setText('damage-dealt', Math.floor(gameState.damageDealt));
+    setText('echo-damage', Math.floor(gameState.echoDamageDealt));
+}
+
+// The run summary spans live in the game over panel; cache them and skip
+// redundant writes because this runs on every hit.
+const textCache = new Map();
+function setText(id, value) {
+    const key = id;
+    if (textCache.get(key) === value) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value;
+    textCache.set(key, value);
+}
+
+export function formatTime(seconds) {
+    const total = Math.max(0, Math.floor(seconds));
+    const minutes = Math.floor(total / 60);
+    return `${minutes}:${total % 60 < 10 ? '0' : ''}${total % 60}`;
 }
 
 export function showGameOverScreen() {
     document.getElementById('game-over').style.display = 'block';
     document.getElementById('pause-menu').style.display = 'none';
     document.getElementById('onboarding').style.display = 'none';
+    document.getElementById('settings-panel').style.display = 'none';
     
     // Fill in run summary
-    document.getElementById('survival-time').textContent = Math.floor((secondsSinceStart - gameState.timePaused) / 60) + ':' + ('0' + ((secondsSinceStart - gameState.timePaused) % 60)).slice(-2);
-    document.getElementById('enemies-defeated').textContent = gameState.enemiesDefeated;
-    document.getElementById('fragments-collected').textContent = gameState.fragmentsCollected;
-    document.getElementById('level-reached').textContent = gameState.level;
-    document.getElementById('damage-dealt').textContent = gameState.damageDealt;
-    document.getElementById('echo-damage').textContent = gameState.echoDamageDealt;
-    document.getElementById('stat-points-spent').textContent = gameState.statPointsSpent;
+    const runTime = getRunTime();
+    setText('survival-time', formatTime(runTime));
+    setText('enemies-defeated', gameState.enemiesDefeated);
+    setText('fragments-collected', gameState.fragmentsCollected);
+    setText('level-reached', gameState.level);
+    setText('damage-dealt', Math.floor(gameState.damageDealt));
+    setText('echo-damage', Math.floor(gameState.echoDamageDealt));
+    setText('stat-points-spent', gameState.statPointsSpent);
     
-    // Show final stats
+    // saveGame() has already run, so this reflects the record including this run
+    const best = saveSystem.saveData.bestTime || gameState.bestSurvivalTime || 0;
+    setText('best-survival-time', formatTime(best));
+    setText('best-level', saveSystem.saveData.highestLevel || 1);
+    
     document.getElementById('final-stats').style.display = 'block';
     document.getElementById('run-summary').style.display = 'block';
+    audio.stopBGM();
 }
 
 export function restartRun() {
@@ -339,24 +466,26 @@ export function restartRun() {
     gameState.statPointsSpent = 0;
     gameState.highestLevel = saveSystem.saveData.highestLevel || 1;
     gameState.bestSurvivalTime = saveSystem.saveData.bestTime || 0;
-    gameState.timePaused = 0;
-    gameState.isPaused = false;
+    gameState.secondsSinceStart = 0;
     secondsSinceStart = 0;
+
     currentWave = 1;
     lastWaveTime = 0;
     enemiesThisWave = 0;
     maxEnemiesPerWave = 5;
     spawnTimer = 0;
+    pendingSpawns = 0;
     clearVisualEffects();
+    fragments.resetAll();
+    bossWaveActive = false;
+    runEnded = false;
+    gameState.statAllocationOpen = false;
+    enemies.setWave(1);
     
-    // Reset player
     player.reset();
-    
-    // Reset upgrades for a completely fresh run
     upgradeSystem.reset();
-    applyPlayerStats();
+    applyPlayerStats({ fullHeal: true });
     
-    // Reset enemies
     enemies.resetAll();
     
     // Reset echo shift
@@ -365,134 +494,130 @@ export function restartRun() {
     echoShift.lastUsed = -999;
     echoShift.duration = player.echoDuration;
     echoShift.cooldown = player.echoCooldown;
+    echoShift.damagedEnemies = null;
+    echoShift.replayProgress = 0;
     
     // Hide UI
     document.getElementById('game-over').style.display = 'none';
     document.getElementById('pause-menu').style.display = 'none';
     
+    // A stat screen left open from the pause menu must not survive the restart
+    import('./ui.js').then((ui) => ui.closeStatScreen());
+    
     // Show onboarding for first run
-    const onboarding = document.getElementById('onboarding');
-    const hasCompletedOnboarding = localStorage.getItem('echoRift_onboardingCompleted');
-    if (!hasCompletedOnboarding) {
-        onboarding.style.display = 'block';
+    if (!saveSystem.saveData.onboardingCompleted) {
+        document.getElementById('onboarding').style.display = 'flex';
     } else {
         // Start gameplay immediately
         gameplayStart();
+        showWaveNotice('Wave 1', false);
     }
     
     // Update display
     updateLevelDisplay();
     updateXPBar();
-    
+    updateUIStats();
 }
 
 export function gameplayStart() {
     if (!gameState) return;
-    // Always unpause - the resume button must work even if a previous
-    // run ended in the paused state
+    if (gameState.statAllocationOpen) return;
     gameState.isPaused = false;
     crazyGames.gameplayStart();
+    audio.startBGM();
 }
 
 export function gameplayStop() {
     if (!gameState) return;
     gameState.isPaused = true;
     crazyGames.gameplayStop();
+    audio.stopBGM();
 }
 
 export function updateEchoShift(deltaTime) {
-    if (echoShift.isActive) {
-        // Replay path - visual effect drawn in UI rendering
-        
-        // Damage logic
-        if (!echoShift.damagedEnemies) echoShift.damagedEnemies = new Set();
-        const activeEnemies = enemies.getActiveEnemies();
-        const echoDamage = player.attackPower * player.echoPower;
-        
-        // Check collisions along the path
-        echoShift.path.forEach(record => {
-            activeEnemies.forEach(enemy => {
-                if (!echoShift.damagedEnemies.has(enemy.id)) {
-                    const dist = Math.hypot(record.x - enemy.x, record.y - enemy.y);
-                    if (dist < enemy.size + 25) { // 25 is approx echo trail radius
-                        enemy.hp -= echoDamage;
-                        enemy.hitFlashUntil = performance.now() / 1000 + 0.16;
-                        spawnHit(enemy.x, enemy.y, '#58e8f4', echoDamage, false);
-                        addEchoDamage(echoDamage);
-                        echoShift.damagedEnemies.add(enemy.id);
-                        audio.play('hit');
-                    }
-                }
-            });
-        });
-        
-        // Check if duration elapsed
-        if (performance.now() / 1000 - echoShift.startTime >= echoShift.duration) {
-            echoShift.isActive = false;
-            echoShift.cooldownRemaining = echoShift.cooldown;
-            echoShift.damagedEnemies = null;
-        }
-    } else {
-        // Count down cooldown
-        if (echoShift.lastUsed + echoShift.cooldown < performance.now() / 1000) {
-            // Ready - could show indicator
+    if (!echoShift.isActive) return;
+
+    const path = echoShift.path;
+    echoShift.elapsed = (echoShift.elapsed || 0) + deltaTime;
+    const progress = Math.min(1, echoShift.elapsed / Math.max(0.001, echoShift.duration));
+    echoShift.replayProgress = progress;
+
+    if (path.length < 2 || progress >= 1) {
+        finishEchoShift();
+        return;
+    }
+
+    if (!echoShift.damagedEnemies) echoShift.damagedEnemies = new Set();
+
+    const maxIndex = path.length - 1;
+    const floatIndex = Math.min(maxIndex, progress * maxIndex);
+    const segIndex = Math.min(maxIndex - 1, Math.floor(floatIndex));
+    const segT = floatIndex - segIndex;
+    const a = path[segIndex];
+    const b = path[segIndex + 1];
+    echoShift.replaySegmentIndex = segIndex;
+    echoShift.replaySegmentT = segT;
+    echoShift.headX = a.x + (b.x - a.x) * segT;
+    echoShift.headY = a.y + (b.y - a.y) * segT;
+
+    const echoDamage = player.attackPower * player.echoPower;
+    const activeEnemies = enemies.getActiveEnemies();
+    const trailRadius = 25;
+
+    // Only the segment currently being swept can deal damage, so the trail
+    // travels across the arena instead of hitting everything at once
+    for (const enemy of activeEnemies) {
+        if (echoShift.damagedEnemies.has(enemy.id)) continue;
+        const dist = distPointToSegment(enemy.x, enemy.y, a.x, a.y, b.x, b.y);
+        if (dist < enemy.size + trailRadius) {
+            enemy.hp -= echoDamage;
+            enemy.hitFlashUntil = performance.now() / 1000 + 0.16;
+            spawnHit(enemy.x, enemy.y, '#58e8f4', echoDamage, false);
+            addEchoDamage(echoDamage);
+            echoShift.damagedEnemies.add(enemy.id);
+            audio.play('hit');
         }
     }
 }
 
+function finishEchoShift() {
+    echoShift.isActive = false;
+    echoShift.damagedEnemies = null;
+    echoShift.elapsed = 0;
+    echoShift.replayProgress = 0;
+    echoShift.replaySegmentIndex = 0;
+    echoShift.replaySegmentT = 0;
+}
+
 export function activateEchoShift() {
-    if (echoShift.lastUsed + echoShift.cooldown > performance.now() / 1000) {
+    const now = getRunTime();
+    if (echoShift.lastUsed + echoShift.cooldown > now) {
         // Not ready yet
         return false;
     }
     
     // Freeze current path and activate echo
     echoShift.isActive = true;
-    echoShift.startTime = performance.now() / 1000;
-    echoShift.path = player.getMovementPath(); // Get last ~5 seconds of positions
-    
-    // Update cooldown
-    echoShift.lastUsed = performance.now() / 1000;
-    
-    // Sound
+    echoShift.startTime = now;
+    echoShift.path = player.getMovementPath();
+    if (echoShift.path.length < 2) {
+        // No trail to replay: do not activate and do not burn the cooldown
+        echoShift.isActive = false;
+        return false;
+    }
+    echoShift.elapsed = 0;
+    echoShift.replayProgress = 0;
+    echoShift.damagedEnemies = new Set();
+    echoShift.lastUsed = now;
     audio.play('echo_shift');
-    
-    // UI update
-    updateEchoShiftIndicator();
-    
     return true;
 }
 
-export function updateEchoShiftIndicator() {
-    const indicator = document.getElementById('echo-shift-indicator');
-    const cooldownText = document.getElementById('echo-shift-cooldown');
-    const shiftText = document.getElementById('echo-shift-text');
-    
-    indicator.style.display = 'block';
-    shiftText.textContent = 'ECHO SHIFT: READY'; // Will be updated
-    
-    // Show cooldown
-    const cooldown = echoShift.cooldown - (performance.now() / 1000 - echoShift.lastUsed);
-    if (cooldown > 0) {
-        cooldownText.textContent = cooldown.toFixed(1) + 's';
-        shiftText.textContent = 'ECHO SHIFT: ' + cooldown.toFixed(1) + 's';
-    } else {
-        cooldownText.textContent = '0.0s';
-        shiftText.textContent = 'ECHO SHIFT: READY';
-    }
-    
-    // Hide after cooldown expires
-    setTimeout(() => {
-        indicator.style.display = 'none';
-    }, 2000);
-}
-
-export function applyPlayerStats() {
-    // Apply stats from upgrade system to player
+export function applyPlayerStats(options = {}) {
     const stats = upgradeSystem.getStats();
-    
+    const previousMax = player.maxHP;
+
     player.maxHP = stats.hp;
-    player.hp = stats.hp; // Full heal on new run/level
     player.moveSpeed = stats.moveSpeed;
     player.attackPower = stats.attackPower;
     player.attackSpeed = stats.attackSpeed;
@@ -502,12 +627,27 @@ export function applyPlayerStats() {
     player.echoPower = stats.echoPower;
     player.echoDuration = stats.echoDuration;
     player.echoCooldown = stats.echoCooldown;
+    player.hpRegen = stats.hpRegen;
+    player.fragmentMagnetRange = stats.fragmentMagnet;
+
+    if (options.fullHeal || options.healOnLevelUp) {
+        player.hp = stats.hp;
+    } else {
+        // Spending a point raises the cap; grant only the new headroom, so a
+        // single click never becomes a free full heal.
+        player.hp = Math.min(stats.hp, player.hp + Math.max(0, stats.hp - previousMax));
+    }
+
     if (echoShift) {
         echoShift.duration = stats.echoDuration;
         echoShift.cooldown = stats.echoCooldown;
     }
-    player.fragmentMagnetRange = stats.fragmentMagnet;
 }
+
+// Stat points are spent through the UI, which reports back here
+upgradeSystem.onPointSpent = () => {
+    if (gameState) gameState.statPointsSpent++;
+};
 
 export function loadGame() {
     gameState.highestLevel = Math.max(gameState.highestLevel, saveSystem.saveData.highestLevel || 1);
@@ -517,5 +657,6 @@ export function loadGame() {
 export function saveGame() {
     saveSystem.saveData.highestLevel = Math.max(saveSystem.saveData.highestLevel || 1, gameState.highestLevel || 1);
     saveSystem.saveData.bestTime = Math.max(saveSystem.saveData.bestTime || 0, gameState.bestSurvivalTime || 0);
+    saveSystem.saveData.bestEnemies = Math.max(saveSystem.saveData.bestEnemies || 0, gameState.enemiesDefeated || 0);
     saveSystem.save();
 }

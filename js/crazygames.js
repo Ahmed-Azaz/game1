@@ -5,6 +5,9 @@ export const crazyGames = {
     isAvailable: false,
     sdkReady: false,
     gameplayActive: false,
+    pendingGameplayActive: null,
+    initPromise: null,
+
     async init() {
         if (this.initPromise) return this.initPromise;
         this.initPromise = (async () => {
@@ -18,6 +21,10 @@ export const crazyGames = {
                 game?.addSettingsChangeListener?.((settings) => {
                     if (settings && 'muteAudio' in settings) setPlatformMuted(settings.muteAudio);
                 });
+                if (this.pendingGameplayActive !== null) {
+                    this.gameplayActive = this.pendingGameplayActive;
+                    this.pendingGameplayActive = null;
+                }
                 this.syncGameplayState();
             } catch (error) {
                 this.isAvailable = this.sdkReady = false;
@@ -26,6 +33,7 @@ export const crazyGames = {
         })();
         return this.initPromise;
     },
+
     syncGameplayState() {
         if (!this.sdkReady) return;
         try {
@@ -33,8 +41,24 @@ export const crazyGames = {
             window.CrazyGames?.SDK?.game?.[method]?.();
         } catch { /* Optional platform integration must not block play. */ }
     },
-    gameplayStart() { this.gameplayActive = true; this.syncGameplayState(); },
-    gameplayStop() { this.gameplayActive = false; this.syncGameplayState(); }
+
+    gameplayStart() {
+        this.gameplayActive = true;
+        if (!this.sdkReady) {
+            this.pendingGameplayActive = true;
+            return;
+        }
+        this.syncGameplayState();
+    },
+
+    gameplayStop() {
+        this.gameplayActive = false;
+        if (!this.sdkReady) {
+            this.pendingGameplayActive = false;
+            return;
+        }
+        this.syncGameplayState();
+    }
 };
 
 window.CrazyGamesIntegration = crazyGames;

@@ -7,6 +7,7 @@ export const saveSystem = {
         bestTime: 0,
         highestLevel: 1,
         highestScore: 0,
+        bestEnemies: 0,
         settings: {
             masterVolume: 0.7,
             sfxVolume: 0.7,
@@ -23,6 +24,16 @@ export const saveSystem = {
     
     load() {
         try {
+            // Stat points are per-run now; drop any leftover key from older builds
+            localStorage.removeItem('echoRift_stats');
+            const legacySettings = localStorage.getItem('echoRift_settings');
+            if (legacySettings) {
+                try {
+                    const parsed = JSON.parse(legacySettings);
+                    this.saveData.settings = { ...this.saveData.settings, ...parsed };
+                    localStorage.removeItem('echoRift_settings');
+                } catch { /* ignore */ }
+            }
             const saved = localStorage.getItem('echoRift_save');
             if (saved) {
                 const data = JSON.parse(saved);
@@ -35,6 +46,7 @@ export const saveSystem = {
                 bestTime: 0,
                 highestLevel: 1,
                 highestScore: 0,
+                bestEnemies: 0,
                 settings: {
                     masterVolume: 0.7,
                     sfxVolume: 0.7,
@@ -50,10 +62,10 @@ export const saveSystem = {
             uiSettingsApply(this.saveData.settings);
         }
         
-        // Check onboarding state
-        if (this.saveData.onboardingCompleted) {
-            document.getElementById('onboarding').style.display = 'none';
-        }
+        const title = document.getElementById('title-screen');
+        const onboarding = document.getElementById('onboarding');
+        if (title) title.style.display = 'flex';
+        if (onboarding) onboarding.style.display = 'none';
     },
     
     save() {
@@ -73,7 +85,6 @@ export const saveSystem = {
 };
 
 function uiSettingsApply(settings) {
-    // Apply volume settings
     if (settings.masterVolume !== undefined) {
         audio.setMasterVolume(settings.masterVolume);
     }
@@ -81,12 +92,18 @@ function uiSettingsApply(settings) {
         audio.setSFXVolume(settings.sfxVolume);
     }
     if (settings.particleQuality) {
-        // Adjust particle limits based on quality
-        const quality = settings.particleQuality;
-        // High: full, Medium: 75%, Low: 50%
-        // This would be used in the game loop
+        import('./visual-effects.js').then((fx) => fx.setParticleQuality(settings.particleQuality));
     }
     if (settings.screenShake !== undefined) {
-        // Enable/disable screen shake
+        import('./visual-effects.js').then((fx) => fx.setScreenShakeEnabled(settings.screenShake));
     }
+}
+
+export function getGameSettings() {
+    return { ...saveSystem.saveData.settings };
+}
+
+export function persistGameSettings(partial) {
+    saveSystem.updateSettings(partial);
+    uiSettingsApply(saveSystem.saveData.settings);
 }
