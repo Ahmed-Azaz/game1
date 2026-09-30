@@ -36,8 +36,16 @@ export const upgradeSystem = {
         // 11. Echo Cooldown - Seconds before echo reuse
         echoCooldown: { base: 15.0, points: 0, increment: -1.0, min: 2.0 },
 
-        // 12. Fragment Magnet Range - Pixels to attract fragments
-        fragmentMagnet: { base: 150, points: 0, increment: 30 }
+        // 12. Multishot - Enemies hit by a single attack volley. Expensive
+        // because one point multiplies everything the player does per swing.
+        multishot: { base: 1, points: 0, increment: 1, cost: 3 }
+    },
+
+    // Stat points a single point of this stat costs. Multishot is 3, everything
+    // else is the default 1.
+    statCost(statKey) {
+        const def = this.stats[statKey];
+        return (def && def.cost) || 1;
     },
     
     // Level-up awards +3 stat points (from Level 2 onwards)
@@ -123,18 +131,19 @@ export const upgradeSystem = {
     },
     
     canSpendPoint(statKey) {
-        if (this.availablePoints <= 0) return false;
         if (!this.stats[statKey]) return false;
-        return true;
+        return this.availablePoints >= this.statCost(statKey);
     },
     
     // For adding points (from level up or UI)
     addPoint(statKey) {
-        if (this.availablePoints <= 0) return false;
         if (!this.stats[statKey]) return false;
         
+        const cost = this.statCost(statKey);
+        if (this.availablePoints < cost) return false;
+        
         this.stats[statKey].points += 1;
-        this.availablePoints -= 1;
+        this.availablePoints -= cost;
         
         this.recalculateAllStats();
         

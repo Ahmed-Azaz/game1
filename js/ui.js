@@ -179,7 +179,7 @@ function setUpEventListeners() {
         if (statScreen && statScreen.style.display === 'block') {
             const num = parseInt(e.key);
             if (num >= 1 && num <= 12) {
-                const keys = ['hp', 'hpRegen', 'moveSpeed', 'attackPower', 'attackSpeed', 'attackRange', 'criticalChance', 'criticalDamage', 'echoPower', 'echoDuration', 'echoCooldown', 'fragmentMagnet'];
+                const keys = ['hp', 'hpRegen', 'moveSpeed', 'attackPower', 'attackSpeed', 'attackRange', 'criticalChance', 'criticalDamage', 'echoPower', 'echoDuration', 'echoCooldown', 'multishot'];
                 if (keys[num - 1] && upgradeSystem.addPoint(keys[num - 1])) {
                     game.applyPlayerStats();
                     audio.play('stat-upgrade');
@@ -285,7 +285,7 @@ function renderStatScreen() {
         { key: 'echoPower', label: 'Echo Power', format: 'echoPower' },
         { key: 'echoDuration', label: 'Echo Duration', format: 'echoDuration' },
         { key: 'echoCooldown', label: 'Echo Cooldown', format: 'echoCooldown' },
-        { key: 'fragmentMagnet', label: 'Fragment Magnet', format: 'fragmentMagnet' }
+        { key: 'multishot', label: 'Multishot', format: 'multishot' }
     ];
     
     statKeys.forEach((stat, index) => {
@@ -314,16 +314,20 @@ function renderStatScreen() {
             formatText = `${current.toFixed(1)} sec`;
         } else if (stat.format === 'echoCooldown') {
             formatText = `${current.toFixed(1)} sec`;
-        } else if (stat.format === 'fragmentMagnet') {
-            formatText = `${current} px`;
+        } else if (stat.format === 'multishot') {
+            formatText = `${current} shot${current === 1 ? '' : 's'}`;
         }
         
-        const isDisabled = availablePoints <= 0;
+        // A stat can cost more than one point, so the button has to compare the
+        // balance against this stat's cost rather than against zero.
+        const cost = upgradeSystem.statCost(stat.key);
+        const isDisabled = availablePoints < cost;
         // Tells the player what a single point is worth now, so percentage
         // scaling stays readable instead of looking like a flat bonus.
         const perPoint = def.percentPerPoint
             ? `+${trim(def.percentPerPoint * 100)}%`
             : `${trim(def.increment)}`;
+        const hint = cost > 1 ? `${perPoint}, costs ${cost} points` : perPoint;
 
         html += `
             <div class="stat-row">
@@ -331,7 +335,7 @@ function renderStatScreen() {
                 <span class="stat-value">${formatText}</span>
                 <span class="stat-base">Base: ${base}</span>
                 <span class="stat-bonus">Bonus: ${bonus}</span>
-                <button class="stat-plus ${isDisabled ? 'disabled' : ''}" data-stat="${stat.key}" title="Per point: ${perPoint}" ${isDisabled ? 'disabled' : ''}>+</button>
+                <button class="stat-plus ${isDisabled ? 'disabled' : ''}" data-stat="${stat.key}" title="Per point: ${hint}" ${isDisabled ? 'disabled' : ''}>${cost > 1 ? `+${cost}` : '+'}</button>
             </div>
         `;
     });
@@ -378,8 +382,8 @@ function calculateBonus(statKey, current, base) {
     if (statKey === 'echoCooldown') {
         return `-${trim(Math.abs(current - base))}s`;
     }
-    if (statKey === 'fragmentMagnet') {
-        return `+${trim(current - base)} px`;
+    if (statKey === 'multishot') {
+        return `+${trim(current - base)} shot${current - base === 1 ? '' : 's'}`;
     }
     return `+${trim(current - base)}`;
 }

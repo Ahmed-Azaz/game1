@@ -691,7 +691,7 @@ export function applyPlayerStats(options = {}) {
     player.echoDuration = stats.echoDuration;
     player.echoCooldown = stats.echoCooldown;
     player.hpRegen = stats.hpRegen;
-    player.fragmentMagnetRange = stats.fragmentMagnet;
+    player.multishot = stats.multishot;
 
     if (options.fullHeal || options.healOnLevelUp) {
         player.hp = stats.hp;

@@ -1,7 +1,8 @@
-// Collectible XP orbs — magnet range from player.fragmentMagnetRange
+// Collectible XP orbs — fixed pickup radius, no stat attached
 import { player } from './player.js';
 import * as game from './game.js';
 
+const MAGNET_RANGE = 150;
 const orbs = [];
 const MAX_ORBS = 160;
 let collectCount = 0;
@@ -28,14 +29,13 @@ export function spawnOrb(x, y, xpValue = 10) {
 }
 
 export function updateAll(deltaTime) {
-    const magnet = player.fragmentMagnetRange || 150;
     for (let i = orbs.length - 1; i >= 0; i--) {
         const orb = orbs[i];
         const dx = player.x - orb.x;
         const dy = player.y - orb.y;
         const dist = Math.hypot(dx, dy);
 
-        if (dist < magnet) {
+        if (dist < MAGNET_RANGE) {
             const pull = dist < 28 ? 420 : 180;
             const nx = dist > 0 ? dx / dist : 0;
             const ny = dist > 0 ? dy / dist : 0;

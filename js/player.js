@@ -23,7 +23,7 @@ export const player = {
     echoPower: 1.0, // Echo damage multiplier
     echoDuration: 3.0, // Seconds
     echoCooldown: 15.0, // Seconds
-    fragmentMagnetRange: 150, // Pixels
+    multishot: 1, // Enemies hit per volley
     hpRegen: 0,
     hurtFlashUntil: 0,
     invulnUntil: 0,
@@ -151,41 +151,51 @@ export const player = {
         if (this.hp > this.maxHP) this.hp = this.maxHP;
     },
     
-    // Auto-attack: find nearest enemy within range and deal damage
+    // Auto-attack: one volley hits up to `multishot` enemies at once, each shot
+    // rolling its own crit. Spare shots land on the nearest target so a thin
+    // arena never turns an upgrade into wasted damage.
     autoAttack(enemyList) {
         const now = performance.now() / 1000;
         if (now - this.lastAttackTime < 1 / this.attackSpeed) return;
         
-        let nearestEnemy = null;
-        let nearestDistance = this.attackRange;
+        const targets = [];
+        const rangeSquared = this.attackRange * this.attackRange;
         
         for (const enemy of enemyList) {
             const dx = enemy.x - this.x;
             const dy = enemy.y - this.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            const distanceSquared = dx * dx + dy * dy;
             
-            if (distance < nearestDistance) {
-                nearestDistance = distance;
-                nearestEnemy = enemy;
-            }
+            if (distanceSquared < rangeSquared) targets.push({ enemy, distanceSquared });
         }
         
-        if (nearestEnemy) {
+        if (!targets.length) return;
+        
+        // Nearest first, so a volley always spends itself on the closest threats
+        targets.sort((a, b) => a.distanceSquared - b.distanceSquared);
+        
+        const shots = Math.max(1, Math.round(this.multishot));
+        const inRange = targets.map((t) => t.enemy);
+        const hitTargets = inRange.slice(0, shots);
+        // Fewer enemies in range than shots: the extra shots stack on the nearest
+        for (let i = hitTargets.length; i < shots; i++) hitTargets.push(inRange[0]);
+        
+        for (const enemy of hitTargets) {
             // Deal damage
             const { damage, critical } = this.calculateDamage(this.attackPower);
-            nearestEnemy.hp -= damage;
-            nearestEnemy.hitFlashUntil = performance.now() / 1000 + 0.12;
-            spawnHit(nearestEnemy.x, nearestEnemy.y, nearestEnemy.color, damage, critical);
+            enemy.hp -= damage;
+            enemy.hitFlashUntil = performance.now() / 1000 + 0.12;
+            spawnHit(enemy.x, enemy.y, enemy.color, damage, critical);
             
             // Track damage
             game.addDamageDealt(damage);
             
             // Visual effect and sound
             audio.play('hit');
-            
-            // Cooldown
-            this.lastAttackTime = performance.now() / 1000;
         }
+        
+        // Cooldown
+        this.lastAttackTime = performance.now() / 1000;
     },
     
     // Returns the crit flag with the damage so the caller never has to infer
