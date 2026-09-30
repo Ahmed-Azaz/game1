@@ -54,6 +54,7 @@ export function initGame() {
     currentWave = 1;
     lastWaveTime = 0;
     enemiesThisWave = 0;
+    killsThisWave = 0;
     maxEnemiesPerWave = 5;
     spawnTimer = 0;
     secondsSinceStart = 0;
@@ -92,6 +93,7 @@ export function initGame() {
 let currentWave = 1;
 let lastWaveTime = 0;
 let enemiesThisWave = 0;
+let killsThisWave = 0;
 let maxEnemiesPerWave = 5;
 let spawnTimer = 0;
 let secondsSinceStart = 0;
@@ -131,12 +133,18 @@ function placeEnemyAtEdge(enemy) {
     }
 }
 
-// Wave pacing: a wave ends the moment the arena is cleared, so the player is
-// never left waiting on a timer they cannot influence. WAVE_MIN_SECONDS keeps a
-// one-second clear from chaining waves, and WAVE_MAX_SECONDS stops a single
-// enemy the player can never reach from stalling the run forever.
-const WAVE_MIN_SECONDS = 3;
+// Wave pacing: a wave ends once the player has killed everything it committed
+// to, so the only thing standing between the player and the next wave is their
+// own clear speed. A wave's opening burst (4-8 enemies, one every 0.5s) already
+// puts a floor under the spacing, so WAVE_MIN_SECONDS only has to be a safety
+// net against a zero-length wave, and WAVE_MAX_SECONDS is the anti-stall backstop.
+const WAVE_MIN_SECONDS = 1;
 const WAVE_MAX_SECONDS = 30;
+
+// Gap between the enemies a wave trickles in. It sets how continuously the arena
+// stays occupied: at a slow drip a player who kills instantly spends the gap
+// staring at an empty screen.
+const SPAWN_INTERVAL = 0.7;
 
 // Total enemies one wave may spawn, on top of its opening burst. A wave's
 // difficulty comes mostly from the wave multipliers, so the body count only has
@@ -151,21 +159,26 @@ export function update(deltaTime) {
     secondsSinceStart += deltaTime;
     gameState.secondsSinceStart = secondsSinceStart;
     
-    // Wave system - ends on a clear, floored and capped so it can neither chain
-    // nor drag
+    // Wave system - ends on a kill quota, floored and capped so it can neither
+    // chain nor drag
     const waveElapsed = secondsSinceStart - lastWaveTime;
-    if (waveElapsed >= WAVE_MAX_SECONDS || (waveElapsed >= WAVE_MIN_SECONDS && isWaveCleared())) {
+    if (waveElapsed >= WAVE_MAX_SECONDS || (waveElapsed >= WAVE_MIN_SECONDS && isWaveQuotaMet())) {
         startNewWave();
         lastWaveTime = secondsSinceStart;
     }
     
     // Spawn enemies during wave. The budget has to fit inside WAVE_MAX_SECONDS at
-    // one enemy per 2s, otherwise the drip is still delivering when the cap
-    // fires, no wave can ever end on a clear, and the pacing rule silently
-    // degrades back into the fixed timer it replaced.
-    if (currentWave > 0 && enemiesThisWave < waveSpawnBudget()) {
+    // one enemy per SPAWN_INTERVAL, otherwise the drip is still delivering when
+    // the cap fires, no wave can ever end on a clear, and the pacing rule
+    // silently degrades back into the fixed timer it replaced.
+    //
+    // The drip is demand driven rather than purely clock driven: a player who
+    // kills faster than the timer feeds would otherwise be left staring at an
+    // empty screen waiting for the next spawn.
+    if (currentWave > 0 && enemiesThisWave < waveSpawnBudget()
+        && enemies.getActiveEnemies().length < Math.ceil(maxEnemiesPerWave / 3)) {
         spawnTimer += deltaTime;
-        if (spawnTimer >= 2) { // Spawn every 2 seconds
+        if (spawnTimer >= SPAWN_INTERVAL) {
             spawnEnemy();
             spawnTimer = 0;
         }
@@ -199,17 +212,39 @@ export function update(deltaTime) {
     checkGameOverState();
 }
 
-// The arena is clear when nothing is left from this wave: no live enemies and
-// no queued drip spawns still waiting to appear (a wave whose opening spawns
-// are still dripping in is not cleared yet).
+// A wave is cleared when the player has killed as many enemies as the wave has
+// committed to. Using the wave's own spawn count as the quota is what makes this
+// robust: the target can never exceed what is actually on the field, and any
+// kill counts, so an enemy the player can never reach (one faster than them, or
+// one left over from an earlier wave) delays nothing. Requiring the opening
+// burst to be spent stops the quota from being met while more are still queued.
+export function isWaveQuotaMet() {
+    if (pendingSpawns > 0) return false;
+    return killsThisWave >= Math.max(1, enemiesThisWave);
+}
+
+// True when nothing is left on the field: no live enemies and no queued drip
+// spawns still waiting to appear.
 export function isWaveCleared() {
     return pendingSpawns === 0 && enemies.getActiveEnemies().length === 0;
+}
+
+export function getPendingSpawns() {
+    return pendingSpawns;
+}
+
+// An enemy culled for wandering too far off still held a slot in its wave's
+// quota. Handing the slot back is what keeps the quota reachable when the player
+// kites: without it the wave waits out the cap on an enemy that no longer exists.
+export function releaseWaveEnemySlot() {
+    if (enemiesThisWave > 0) enemiesThisWave--;
 }
 
 export function startNewWave() {
     currentWave++;
     maxEnemiesPerWave = Math.min(5 + Math.floor(currentWave / 3), 15); // Scale up to 15
     enemiesThisWave = 0;
+    killsThisWave = 0;
     bossWaveActive = currentWave % 10 === 0;
     spawnTimer = 0;
     enemies.setWave(currentWave);
@@ -388,6 +423,7 @@ export function addDamageDealt(amount) {
 
 export function addEnemiesDefeated(amount = 1) {
     gameState.enemiesDefeated += amount;
+    killsThisWave += amount;
     updateUIStats();
 }
 
@@ -498,6 +534,7 @@ export function restartRun() {
     currentWave = 1;
     lastWaveTime = 0;
     enemiesThisWave = 0;
+    killsThisWave = 0;
     maxEnemiesPerWave = 5;
     spawnTimer = 0;
     pendingSpawns = 0;

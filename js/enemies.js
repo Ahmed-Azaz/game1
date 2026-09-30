@@ -183,6 +183,7 @@ export function updateAll(deltaTime) {
         
         // Check if out of screen (despawn)
         if (isOffScreen(enemy)) {
+            game.releaseWaveEnemySlot();
             activeEnemies.splice(i, 1);
         }
     }
