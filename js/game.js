@@ -131,20 +131,39 @@ function placeEnemyAtEdge(enemy) {
     }
 }
 
+// Wave pacing: a wave ends the moment the arena is cleared, so the player is
+// never left waiting on a timer they cannot influence. WAVE_MIN_SECONDS keeps a
+// one-second clear from chaining waves, and WAVE_MAX_SECONDS stops a single
+// enemy the player can never reach from stalling the run forever.
+const WAVE_MIN_SECONDS = 3;
+const WAVE_MAX_SECONDS = 30;
+
+// Total enemies one wave may spawn, on top of its opening burst. A wave's
+// difficulty comes mostly from the wave multipliers, so the body count only has
+// to be big enough to fill the screen.
+function waveSpawnBudget() {
+    return maxEnemiesPerWave * 2;
+}
+
 export function update(deltaTime) {
     if (!gameState || gameState.isPaused) return;
     
     secondsSinceStart += deltaTime;
     gameState.secondsSinceStart = secondsSinceStart;
     
-    // Wave system - every 30 seconds a new wave
-    if (secondsSinceStart - lastWaveTime >= 30) {
+    // Wave system - ends on a clear, floored and capped so it can neither chain
+    // nor drag
+    const waveElapsed = secondsSinceStart - lastWaveTime;
+    if (waveElapsed >= WAVE_MAX_SECONDS || (waveElapsed >= WAVE_MIN_SECONDS && isWaveCleared())) {
         startNewWave();
         lastWaveTime = secondsSinceStart;
     }
     
-    // Spawn enemies during wave
-    if (currentWave > 0 && enemiesThisWave < maxEnemiesPerWave * 3) {
+    // Spawn enemies during wave. The budget has to fit inside WAVE_MAX_SECONDS at
+    // one enemy per 2s, otherwise the drip is still delivering when the cap
+    // fires, no wave can ever end on a clear, and the pacing rule silently
+    // degrades back into the fixed timer it replaced.
+    if (currentWave > 0 && enemiesThisWave < waveSpawnBudget()) {
         spawnTimer += deltaTime;
         if (spawnTimer >= 2) { // Spawn every 2 seconds
             spawnEnemy();
@@ -178,6 +197,13 @@ export function update(deltaTime) {
     
     // Check game over
     checkGameOverState();
+}
+
+// The arena is clear when nothing is left from this wave: no live enemies and
+// no queued drip spawns still waiting to appear (a wave whose opening spawns
+// are still dripping in is not cleared yet).
+export function isWaveCleared() {
+    return pendingSpawns === 0 && enemies.getActiveEnemies().length === 0;
 }
 
 export function startNewWave() {
