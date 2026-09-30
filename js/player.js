@@ -214,11 +214,17 @@ export const player = {
 let incoming = amount;
 
 // Juggernaut: a single contact hit can never take more than a slice of your
-// max HP, so a big HP pool turns "deleted by the pack" into "grounded down".
-// Contact still hurts, which keeps positioning meaningful.
-if (source === 'contact' && perks.has('juggernaut')) {
-    incoming = Math.min(incoming, this.maxHP * JUGGERNAUT_CONTACT_CAP);
-}
+    // max HP, so a big HP pool turns "deleted by the pack" into "grounded down".
+    // Contact still hurts, which keeps positioning meaningful.
+    //
+    // Deliberately does NOT cover 'ranged'. Enemy projectiles (drifter bolts,
+    // echo hunter bolts, warden lance, every rift core pattern) all report
+    // 'ranged' so that Juggernaut cannot turn a big HP pool into blanket
+    // immunity against everything that crosses the arena. Standing behind your
+    // Echo wall is the intended answer to those; a HP pool is not.
+    if (source === 'contact' && perks.has('juggernaut')) {
+        incoming = Math.min(incoming, this.maxHP * JUGGERNAUT_CONTACT_CAP);
+    }
 
         // Stonewall: the first lethal hit of a wave is survived
         if (this.hp - incoming <= 0 && perks.has('stonewall') && !this.stonewallUsed) {

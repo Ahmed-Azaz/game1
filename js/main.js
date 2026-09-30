@@ -2,6 +2,7 @@
 import { initGame, update as gameUpdate, echoShift, getRunTime, gameplayStart, gameplayStop, isMarked } from './game.js';
 import { player } from './player.js';
 import { resetAll as resetEnemies, getActiveEnemies } from './enemies.js';
+import * as projectiles from './projectiles.js';
 import { ui } from './ui.js';
 import { saveSystem } from './save.js';
 import { initAudioContext } from './audio.js';
@@ -127,6 +128,8 @@ function render() {
     fragments.render(ctx, t);
     drawEchoTrail(ctx, t);
     for (const enemy of enemies) drawEnemy(ctx, enemy, t);
+    drawEnemyTelegraphs(ctx, enemies, t);
+    projectiles.render(ctx, t);
     drawPlayerAura(ctx, t);
     drawAttackLine(ctx, enemies, t);
     drawPlayer(ctx, t);
@@ -280,6 +283,67 @@ function drawEnemy(ctx, e, t) {
         ctx.arc(e.x, e.y, r * 1.28, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
+    }
+}
+
+// Telegraphs for the abilities that can still be dodged. Everything drawn here
+// is a promise the AI already made: the line a charger locked in, the lance a
+// warden is charging, the well a beast is pulling with.
+function drawEnemyTelegraphs(ctx, enemies, t) {
+    for (const e of enemies) {
+        if (e.hp <= 0) continue;
+
+        // Null Beast gravity well
+        if (e.type === 'null_beast') {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(80,227,194,.18)';
+            ctx.setLineDash([4, 10]);
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, 260, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Charger: the locked rush line, filling as the windup runs out
+        if (e.type === 'charger' && e.aiState === 'rush_windup') {
+            const len = 220;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,107,53,.5)';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([9, 7]);
+            ctx.beginPath();
+            ctx.moveTo(e.x, e.y);
+            ctx.lineTo(e.x + e.rushDx * len, e.y + e.rushDy * len);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Rift Warden: charging lance, plus a brightening tell as it completes
+        if (e.type === 'rift_warden' && e.lanceState === 'charging') {
+            const progress = 1 - e.lanceCharge;
+            const len = 260 * progress;
+            ctx.save();
+            ctx.strokeStyle = `rgba(174,129,255,${0.35 + progress * 0.55})`;
+            ctx.lineWidth = 2 + progress * 4;
+            ctx.beginPath();
+            ctx.moveTo(e.x, e.y);
+            ctx.lineTo(e.x + Math.cos(e.lanceAngle) * len, e.y + Math.sin(e.lanceAngle) * len);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Echo Hunter phasing through the wall reads as an outline
+        if (e.insideEchoWall) {
+            ctx.save();
+            ctx.strokeStyle = `rgba(0,212,255,${0.4 + Math.sin(t * 12) * 0.3})`;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, e.size * 1.3, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 }
 

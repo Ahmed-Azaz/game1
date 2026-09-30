@@ -1,5 +1,6 @@
 // Core game state, loop, spawn management, and difficulty scaling
 import * as enemies from './enemies.js';
+import * as projectiles from './projectiles.js';
 import { player } from './player.js';
 import { upgradeSystem } from './upgrades.js';
 import { perks } from './perks.js';
@@ -202,6 +203,7 @@ export function update(deltaTime) {
     
     // Update existing enemies
     enemies.updateAll(deltaTime);
+    projectiles.updateAll(deltaTime);
     fragments.updateAll(deltaTime);
     
     // Player auto-attack nearest enemy in range
@@ -672,6 +674,7 @@ export function restartRun() {
     pendingSpawns = 0;
     clearVisualEffects();
     fragments.resetAll();
+    projectiles.reset();
     bossWaveActive = false;
     runEnded = false;
     gameState.statAllocationOpen = false;
@@ -840,6 +843,21 @@ function closestPointOnSegment(px, py, x1, y1, x2, y2) {
     let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
     t = Math.max(0, Math.min(1, t));
     return { x: x1 + t * dx, y: y1 + t * dy };
+}
+
+// The barrier only exists once the sweep has finished, so everything that wants
+// to interact with the wall (projectiles, phasing bodies) has to ask this rather
+// than reading echoShift directly.
+export function isEchoWallUp() {
+    return !!echoShift.isActive && !!echoShift.path && echoShift.path.length >= 2
+        && echoShift.elapsed >= ECHO_SWEEP_SECONDS;
+}
+
+// Is a point inside the standing wall? `padding` covers the projectile or body
+// radius, so callers test their own edge against the line.
+export function isInsideEchoWall(px, py, padding = 0) {
+    if (!isEchoWallUp()) return false;
+    return distanceToPath(px, py, echoShift.path) < padding + ECHO_WALL_HALF_WIDTH;
 }
 
 // The standing Echo line is a wall: enemies stop at it and burn against it.
