@@ -204,13 +204,21 @@ export const player = {
         const now = performance.now() / 1000;
         if (now < this.invulnUntil) return;
 
-        // Juggernaut: bodies cannot touch you while you are still healthy, so
-        // the reward for a big HP pool is also the reward for keeping it
-        if (source === 'contact' && perks.has('juggernaut') && this.hp > this.maxHP * JUGGERNAUT_THRESHOLD) {
-            return;
-        }
+// Juggernaut, previous version, kept for reference. Contact immunity above half
+// HP was strong enough to delete an entire threat type, so it was replaced by a
+// damage cap. Restore the block below to get it back.
+// if (source === 'contact' && perks.has('juggernaut') && this.hp > this.maxHP * JUGGERNAUT_THRESHOLD) {
+//     return;
+// }
 
-        let incoming = amount;
+let incoming = amount;
+
+// Juggernaut: a single contact hit can never take more than a slice of your
+// max HP, so a big HP pool turns "deleted by the pack" into "grounded down".
+// Contact still hurts, which keeps positioning meaningful.
+if (source === 'contact' && perks.has('juggernaut')) {
+    incoming = Math.min(incoming, this.maxHP * JUGGERNAUT_CONTACT_CAP);
+}
 
         // Stonewall: the first lethal hit of a wave is survived
         if (this.hp - incoming <= 0 && perks.has('stonewall') && !this.stonewallUsed) {
@@ -393,7 +401,8 @@ const MOMENTUM_PER_STACK = 0.08;
 const MOMENTUM_MAX_STACKS = 10;
 const MOMENTUM_WINDOW = 2;
 const REGEN_HOLD_OFF = 1.2;
-const JUGGERNAUT_THRESHOLD = 0.5;
+const JUGGERNAUT_CONTACT_CAP = 0.15; // a contact hit takes at most 15% of max HP
+const JUGGERNAUT_THRESHOLD = 0.5; // only used by the commented-out immunity above
 const SECOND_WIND_PERIOD = 20;
 const SECOND_WIND_TRIGGER = 0.3;
 const SECOND_WIND_RESTORE = 0.6;
