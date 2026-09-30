@@ -57,10 +57,13 @@ export const PERKS = [
     { id: 'flurry', stat: 'attackSpeed', tier: 2, threshold: 1400, name: 'Flurry',
       description: 'Land 6 attacks in a row and the next 3 ignore your attack cooldown.' },
 
-    // Attack Range
-    { id: 'pierce', stat: 'attackRange', tier: 1, threshold: 80, name: 'Pierce',
+// Attack Range
+// The whole ladder is 15 points (150 -> 300), i.e. a 100% bonus is the hard
+// ceiling, so the tiers sit at 6 and 12 points. The old 80/160 pair put tier 2
+// at 390 range, which the cap makes impossible.
+{ id: 'pierce', stat: 'attackRange', tier: 1, threshold: 40, name: 'Pierce',
       description: 'Shots pass through and hit everything lined up in their path.' },
-    { id: 'mark', stat: 'attackRange', tier: 2, threshold: 160, name: 'Mark',
+    { id: 'mark', stat: 'attackRange', tier: 2, threshold: 80, name: 'Mark',
       description: 'Enemies inside your range are marked and take +20% damage from all sources.' },
 
     // Critical Chance

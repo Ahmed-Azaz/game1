@@ -25,6 +25,10 @@ let statScreenMode = 'manual';
 let activeTab = 'stats';
 // Perks unlocked since the player last looked, so the reward is never silent
 let pendingUnlocks = [];
+// Short-lived message shown when an action is refused, e.g. spending a point on
+// a stat that is already capped
+let statNotice = '';
+let statNoticeTimer = null;
 // Opening from the pause menu has to stop the run exactly once, not on every
 // re-render of the screen
 let gameplayStoppedForScreen = false;
@@ -84,6 +88,7 @@ export function closeStatScreen() {
     statScreenMode = 'manual';
     activeTab = 'stats';
     pendingUnlocks = [];
+    clearStatNotice();
     gameplayStoppedForScreen = false;
 }
 
@@ -117,6 +122,7 @@ function setUpEventListeners() {
         if (tab) {
             activeTab = tab;
             pendingUnlocks = [];
+            clearStatNotice();
             renderStatScreen();
         }
     });
@@ -124,7 +130,8 @@ function setUpEventListeners() {
     // Stat point buttons
     document.addEventListener('click', (e) => {
         if (e.target.classList.contains('stat-plus') && !e.target.disabled) {
-            if (upgradeSystem.addPoint(e.target.dataset.stat)) {
+            const statKey = e.target.dataset.stat;
+            if (upgradeSystem.addPoint(statKey)) {
                 game.applyPlayerStats();
                 audio.play('stat-upgrade');
                 renderStatScreen();
@@ -224,7 +231,12 @@ function setUpEventListeners() {
         if (statScreen && statScreen.style.display === 'block' && activeTab === 'stats') {
             const num = parseInt(e.key);
             if (num >= 1 && num <= QUICK_KEY_STATS.length) {
-                if (upgradeSystem.addPoint(QUICK_KEY_STATS[num - 1])) {
+                const statKey = QUICK_KEY_STATS[num - 1];
+                if (upgradeSystem.isMaxed(statKey)) {
+                    showStatNotice(`${statLabel(statKey)} is already maxed out.`);
+                    return;
+                }
+                if (upgradeSystem.addPoint(statKey)) {
                     game.applyPlayerStats();
                     audio.play('stat-upgrade');
                     renderStatScreen();
@@ -322,6 +334,7 @@ function renderStatScreen() {
                     `).join('')}
                 </div>
                 ${renderUnlockBanner()}
+                ${statNotice ? `<div class="stat-notice">${statNotice}</div>` : ''}
                 <div class="upgrade-panel">
                     ${renderActiveTab()}
                 </div>
@@ -342,6 +355,32 @@ function renderStatScreen() {
         game.gameplayStop();
         gameplayStoppedForScreen = true;
     }
+}
+
+function statLabel(statKey) {
+    const row = STAT_ROWS.find((r) => r.key === statKey);
+    return row ? row.label : statKey;
+}
+
+function clearStatNotice() {
+    statNotice = '';
+    if (statNoticeTimer) {
+        clearTimeout(statNoticeTimer);
+        statNoticeTimer = null;
+    }
+}
+
+// Refused actions need to say so: a point that vanishes with no explanation
+// reads as a bug, and a stat row that looks spendable when it is not is worse.
+function showStatNotice(message) {
+    statNotice = message;
+    if (statNoticeTimer) clearTimeout(statNoticeTimer);
+    statNoticeTimer = setTimeout(() => {
+        statNotice = '';
+        statNoticeTimer = null;
+        if (activeTab === 'stats') renderStatScreen();
+    }, 1600);
+    if (activeTab === 'stats') renderStatScreen();
 }
 
 function renderActiveTab() {
@@ -404,21 +443,28 @@ function renderStatsTab() {
         // A stat can cost more than one point, so the button has to compare the
         // balance against this stat's cost rather than against zero.
         const cost = upgradeSystem.statCost(stat.key);
-        const isDisabled = availablePoints < cost;
+        // Capped stats (Critical Chance, Critical Damage, Echo Cooldown) cannot
+        // take another point, so say so instead of silently eating the click
+        const maxed = upgradeSystem.isMaxed(stat.key);
+        const isDisabled = maxed || availablePoints < cost;
         // Tells the player what a single point is worth now, so percentage
         // scaling stays readable instead of looking like a flat bonus.
         const perPoint = def.percentPerPoint
             ? `+${trim(def.percentPerPoint * 100)}%`
             : `${trim(def.increment)}`;
-        const hint = cost > 1 ? `${perPoint}, costs ${cost} points` : perPoint;
+        const hint = maxed
+            ? 'Already maxed out, further points have no effect'
+            : `Per point: ${cost > 1 ? `${perPoint}, costs ${cost} points` : perPoint}`;
+        const bonusText = maxed ? 'Maxed' : `Bonus: ${bonus}`;
+        const plusText = maxed ? 'MAX' : (cost > 1 ? `+${cost}` : '+');
 
         html += `
-            <div class="stat-row">
+            <div class="stat-row ${maxed ? 'maxed' : ''}">
                 <span class="stat-name">${stat.label}</span>
                 <span class="stat-value">${formatText}</span>
                 <span class="stat-base">Base: ${base}</span>
-                <span class="stat-bonus">Bonus: ${bonus}</span>
-                <button class="stat-plus ${isDisabled ? 'disabled' : ''}" data-stat="${stat.key}" title="Per point: ${hint}" ${isDisabled ? 'disabled' : ''}>${cost > 1 ? `+${cost}` : '+'}</button>
+                <span class="stat-bonus">${bonusText}</span>
+                <button class="stat-plus ${isDisabled ? 'disabled' : ''}" data-stat="${stat.key}" title="${hint}" ${isDisabled ? 'disabled' : ''}>${plusText}</button>
             </div>
         `;
     });

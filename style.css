@@ -377,6 +377,34 @@ body {
     cursor: default;
 }
 
+/* A stat that has hit its own ceiling: readable as done, not broken */
+.stat-row.maxed .stat-name,
+.stat-row.maxed .stat-value {
+    color: var(--accent-cyan);
+}
+
+.stat-row.maxed .stat-bonus {
+    color: var(--accent-cyan);
+    letter-spacing: 0.08em;
+}
+
+.stat-row.maxed .stat-plus {
+    opacity: 0.65;
+    cursor: default;
+}
+
+/* Refused action feedback, e.g. spending a point on a maxed stat */
+.stat-notice {
+    border: 1px solid #ff8b87;
+    background: rgba(255, 139, 135, 0.1);
+    color: #ffd4d2;
+    border-radius: 3px;
+    padding: 7px 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    text-align: center;
+}
+
 .stat-points {
     margin-top: 16px;
     color: var(--text-primary);

@@ -18,8 +18,10 @@ export const upgradeSystem = {
         // 5. Attack Speed - Attacks per second
         attackSpeed: { base: 1.0, points: 0, percentPerPoint: 0.12 },
 
-        // 6. Attack Range - Pixels to target
-        attackRange: { base: 150, points: 0, increment: 10 },
+// 6. Attack Range - Pixels to target
+// Capped at 300 (15 points). Uncapped, a long enough ladder trivialises enemy
+// spacing and lets you hit the whole arena from the spawn point.
+attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
 
         // 7. Critical Chance - Percent
         criticalChance: { base: 5, points: 0, percentPerPoint: 0.15, round: 'ceil', min: 0, max: 25 },
@@ -132,13 +134,35 @@ export const upgradeSystem = {
     
     canSpendPoint(statKey) {
         if (!this.stats[statKey]) return false;
+        if (this.isMaxed(statKey)) return false;
         return this.availablePoints >= this.statCost(statKey);
     },
-    
+
+    // True when another point cannot move this stat at all, because the ladder
+    // has reached the stat's own ceiling or floor: Critical Chance caps at 25%,
+    // Critical Damage at 300%, Echo Cooldown bottoms out at 2s. Spending into a
+    // capped stat used to burn points for nothing, so the UI and the hotkeys
+    // both check this first.
+    isMaxed(statKey) {
+        const def = this.stats[statKey];
+        if (!def) return false;
+        const current = this.resolveStat(def);
+        if (def.max !== undefined && current >= def.max) return true;
+        if (def.min !== undefined && current <= def.min) return true;
+        return false;
+    },
+
+    // Every stat currently at its ceiling, for the "no points left to spend
+    // here" messaging.
+    getMaxedStats() {
+        return Object.keys(this.stats).filter((key) => this.isMaxed(key));
+    },
+
     // For adding points (from level up or UI)
     addPoint(statKey) {
         if (!this.stats[statKey]) return false;
-        
+        if (this.isMaxed(statKey)) return false;
+
         const cost = this.statCost(statKey);
         if (this.availablePoints < cost) return false;
         
