@@ -84,6 +84,9 @@ let activeEnemies = [];
 let enemyIdCounter = 0;
 let currentWave = 1;
 
+// Deep Cut slow multiplier
+const DEEP_CUT_SLOW = 0.6;
+
 // Enemy types that are bosses or elites scale more gently than fodder.
 const BOSS_TYPES = new Set(['rift_core', 'rift_warden']);
 
@@ -135,7 +138,12 @@ export function create(type) {
         baseSpeed: template.speed * scale.speed,
         aiState: 'approach', // approach, rush_windup, rushing, flee, summon
         timeSinceAction: Math.random() * 2,
-        lastDamageTime: -Infinity
+        lastDamageTime: -Infinity,
+        // Perk state, all timestamp based so they lapse on their own
+        markedRangeUntil: 0,
+        markedEchoUntil: 0,
+        slowUntil: 0,
+        perkKillHandled: false
     };
     
     activeEnemies.push(enemy);
@@ -154,6 +162,13 @@ export function updateAll(deltaTime) {
         
         // AI behavior
         updateEnemyAI(enemy, deltaTime);
+
+        // Deep Cut: a slowed enemy keeps the reduced pace the AI gave it, so the
+        // slow survives the type's own speed maths
+        if (enemy.slowUntil > performance.now() / 1000) {
+            enemy.vx *= DEEP_CUT_SLOW;
+            enemy.vy *= DEEP_CUT_SLOW;
+        }
         
         // Move enemy
         enemy.x += enemy.vx * deltaTime;
@@ -165,7 +180,7 @@ export function updateAll(deltaTime) {
         if (distToPlayer < enemy.size + playerRadius) {
             const now = performance.now() / 1000;
             if (now - enemy.lastDamageTime > 0.5) {
-                player.takeDamage(enemy.damage);
+                player.takeDamage(enemy.damage, 'contact');
                 enemy.lastDamageTime = now;
                 // Small shove so the player is never pinned inside a body
                 if (distToPlayer > 0.01) {

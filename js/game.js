@@ -2,6 +2,7 @@
 import * as enemies from './enemies.js';
 import { player } from './player.js';
 import { upgradeSystem } from './upgrades.js';
+import { perks } from './perks.js';
 import * as audio from './audio.js';
 import { crazyGames } from './crazygames.js';
 import { saveSystem } from './save.js';
@@ -77,7 +78,10 @@ export function initGame() {
         replaySegmentIndex: 0,
         replaySegmentT: 0,
         headX: 0,
-        headY: 0
+        headY: 0,
+        powerScale: 1, // Twin Echo replays at half power
+        queued: false, // Quick Recall / Twin Echo follow-up replay
+        queuedPowerScale: 1
     };
     
     loadGame();
@@ -205,6 +209,10 @@ export function update(deltaTime) {
     // Update echo shift
     updateEchoShift(deltaTime);
     
+    // Mark perk: anything standing in your range is lit up and takes more
+    // damage from every source, the Echo included
+    markEnemiesInRange();
+
     // Check for level up
     checkLevelUp();
     
@@ -247,6 +255,8 @@ export function startNewWave() {
     killsThisWave = 0;
     bossWaveActive = currentWave % 10 === 0;
     spawnTimer = 0;
+    // Stonewall is once per wave, so it has to come back with the wave
+    player.stonewallUsed = false;
     enemies.setWave(currentWave);
 
     if (bossWaveActive) {
@@ -427,6 +437,127 @@ export function addEnemiesDefeated(amount = 1) {
     updateUIStats();
 }
 
+// ---------------------------------------------------------------------------
+// Perk support: one place that applies damage and reacts to kills, so every
+// perk effect flows through the same pipeline instead of being scattered across
+// the attack, echo and enemy code.
+// ---------------------------------------------------------------------------
+
+const perkUnlockQueue = [];
+
+// Newly unlocked perks are queued here so the UI can celebrate each one
+// exactly once, no matter which code path spent the point.
+export function consumePerkUnlocks() {
+    const queued = perkUnlockQueue.slice();
+    perkUnlockQueue.length = 0;
+    return queued;
+}
+
+// Central damage entry point. Returns the damage actually dealt (after the
+// Mark multipliers) so callers can display the real number.
+export function damageEnemy(enemy, amount, options = {}) {
+    if (!enemy || enemy.hp <= 0 || amount <= 0) return 0;
+
+    const now = performance.now() / 1000;
+    let damage = amount;
+
+    // Mark / Lingering Mark. The stronger mark wins rather than the two
+    // stacking, so committing to both ranges and echo duration is not secretly
+    // the strongest build in the game.
+    let markBonus = 0;
+    if (enemy.markedRangeUntil > now) markBonus = Math.max(markBonus, MARK_RANGE_BONUS);
+    if (enemy.markedEchoUntil > now) markBonus = Math.max(markBonus, MARK_ECHO_BONUS);
+    if (markBonus > 0) damage *= 1 + markBonus;
+
+    enemy.hp -= damage;
+    enemy.hitFlashUntil = now + 0.12;
+
+    // Deep Cut: a critical hit drags the target's pace out of the fight
+    if (options.critical && perks.has('deepCut')) {
+        enemy.slowUntil = now + DEEP_CUT_SLOW_SECONDS;
+    }
+
+    if (enemy.hp <= 0) handleEnemyKilled(enemy, options);
+    return damage;
+}
+
+const MARK_RANGE_BONUS = 0.20;
+const MARK_ECHO_BONUS = 0.25;
+const DEEP_CUT_SLOW_SECONDS = 2;
+
+// Perk reactions to a kill. Guarded so a single kill can never fire twice, no
+// matter how many sources land on it in the same frame.
+function handleEnemyKilled(enemy, options = {}) {
+    if (enemy.perkKillHandled) return;
+    enemy.perkKillHandled = true;
+
+    // Momentum: every kill feeds the speed meter
+    player.onKill();
+
+    if (options.critical && perks.has('chainCrit')) chainCritFrom(enemy);
+    if (perks.has('shatter')) shatterFrom(enemy);
+}
+
+// Shatter: the corpse pays out its own remaining durability to everything
+// standing next to it.
+function shatterFrom(dead) {
+    const radius = SHATTER_RADIUS;
+    const radiusSquared = radius * radius;
+    const damage = dead.maxHP * SHATTER_FRACTION;
+    for (const enemy of enemies.getActiveEnemies()) {
+        if (enemy === dead || enemy.hp <= 0) continue;
+        const dx = enemy.x - dead.x;
+        const dy = enemy.y - dead.y;
+        if (dx * dx + dy * dy > radiusSquared) continue;
+        damageEnemy(enemy, damage, { source: 'shatter' });
+        spawnHit(enemy.x, enemy.y, '#ffb648', damage, false);
+    }
+}
+
+const SHATTER_RADIUS = 80;
+const SHATTER_FRACTION = 0.4;
+
+// Chain Crit: the killing blow arcs to the two nearest survivors
+function chainCritFrom(dead) {
+    const targets = enemies.getActiveEnemies()
+        .filter((enemy) => enemy !== dead && enemy.hp > 0)
+        .map((enemy) => ({
+            enemy,
+            distanceSquared: (enemy.x - player.x) ** 2 + (enemy.y - player.y) ** 2
+        }))
+        .sort((a, b) => a.distanceSquared - b.distanceSquared)
+        .slice(0, 2);
+
+    const damage = player.attackPower * CHAIN_CRIT_FRACTION;
+    for (const target of targets) {
+        damageEnemy(target.enemy, damage, { source: 'chain' });
+        spawnHit(target.enemy.x, target.enemy.y, '#ffe66d', damage, true);
+    }
+}
+
+const CHAIN_CRIT_FRACTION = 0.5;
+
+// Mark: refreshes every frame, so the flag lapses the moment an enemy steps
+// out of range
+export function markEnemiesInRange() {
+    if (!perks.has('mark')) return;
+    const now = performance.now() / 1000;
+    const rangeSquared = player.attackRange * player.attackRange;
+    for (const enemy of enemies.getActiveEnemies()) {
+        if (enemy.hp <= 0) continue;
+        const dx = enemy.x - player.x;
+        const dy = enemy.y - player.y;
+        if (dx * dx + dy * dy <= rangeSquared) {
+            enemy.markedRangeUntil = now + 0.1;
+        }
+    }
+}
+
+// Which enemies the player can currently see marked, for rendering
+export function isMarked(enemy, now = performance.now() / 1000) {
+    return enemy.markedRangeUntil > now || enemy.markedEchoUntil > now;
+}
+
 export function loadGameSettings() {
     return saveSystem.saveData?.settings
         ? { ...saveSystem.saveData.settings }
@@ -547,6 +678,8 @@ export function restartRun() {
     
     player.reset();
     upgradeSystem.reset();
+    perks.reset();
+    perkUnlockQueue.length = 0;
     applyPlayerStats({ fullHeal: true });
     
     enemies.resetAll();
@@ -559,6 +692,9 @@ export function restartRun() {
     echoShift.cooldown = player.echoCooldown;
     echoShift.damagedEnemies = null;
     echoShift.replayProgress = 0;
+    echoShift.queued = false;
+    echoShift.queuedPowerScale = 1;
+    echoShift.powerScale = 1;
     
     // Hide UI
     document.getElementById('game-over').style.display = 'none';
@@ -623,9 +759,12 @@ export function updateEchoShift(deltaTime) {
     echoShift.headX = a.x + (b.x - a.x) * segT;
     echoShift.headY = a.y + (b.y - a.y) * segT;
 
-    const echoDamage = player.attackPower * player.echoPower;
+    const echoDamage = player.attackPower * player.echoPower * (echoShift.powerScale || 1);
     const activeEnemies = enemies.getActiveEnemies();
     const trailRadius = 25;
+    // Resonance: the replay's closing sweep lands with double weight
+    const finishing = perks.has('resonance') && progress >= RESONANCE_FINISH_AT;
+    const now = performance.now() / 1000;
 
     // Only the segment currently being swept can deal damage, so the trail
     // travels across the arena instead of hitting everything at once
@@ -633,44 +772,106 @@ export function updateEchoShift(deltaTime) {
         if (echoShift.damagedEnemies.has(enemy.id)) continue;
         const dist = distPointToSegment(enemy.x, enemy.y, a.x, a.y, b.x, b.y);
         if (dist < enemy.size + trailRadius) {
-            enemy.hp -= echoDamage;
-            enemy.hitFlashUntil = performance.now() / 1000 + 0.16;
-            spawnHit(enemy.x, enemy.y, '#58e8f4', echoDamage, false);
-            addEchoDamage(echoDamage);
+            const damage = finishing ? echoDamage * 2 : echoDamage;
+            damageEnemy(enemy, damage, { source: 'echo' });
+            spawnHit(enemy.x, enemy.y, '#58e8f4', damage, false);
+            addEchoDamage(damage);
             echoShift.damagedEnemies.add(enemy.id);
+            // Lingering Mark: the Echo brands everything it touches
+            if (perks.has('lingeringMark')) {
+                enemy.markedEchoUntil = now + LINGERING_MARK_SECONDS;
+            }
             audio.play('hit');
         }
     }
 }
 
+const RESONANCE_FINISH_AT = 0.75;
+const LINGERING_MARK_SECONDS = 4;
+
 function finishEchoShift() {
+    // Never Fade: the replay spends its last breath on everything it branded
+    if (perks.has('neverFade')) {
+        const now = performance.now() / 1000;
+        const damage = player.attackPower * player.echoPower * (echoShift.powerScale || 1) * NEVER_FADE_FRACTION;
+        for (const enemy of enemies.getActiveEnemies()) {
+            if (enemy.hp <= 0 || enemy.markedEchoUntil <= now) continue;
+            damageEnemy(enemy, damage, { source: 'echo' });
+            spawnHit(enemy.x, enemy.y, '#58e8f4', damage, false);
+            addEchoDamage(damage);
+        }
+    }
+
+    // Twin Echo / Quick Recall: run the follow-up replay straight away instead
+    // of sitting idle until the cooldown expires. The flag is consumed here so
+    // one activation can never queue an endless chain of replays.
+    if (echoShift.queued) {
+        const queuedPower = echoShift.queuedPowerScale;
+        echoShift.queued = false;
+        echoShift.queuedPowerScale = 1;
+        if (startEchoReplay(queuedPower)) return;
+    }
+
     echoShift.isActive = false;
     echoShift.damagedEnemies = null;
     echoShift.elapsed = 0;
     echoShift.replayProgress = 0;
     echoShift.replaySegmentIndex = 0;
     echoShift.replaySegmentT = 0;
+    echoShift.queued = false;
+    echoShift.powerScale = 1;
 }
 
-export function activateEchoShift() {
-    const now = getRunTime();
-    if (echoShift.lastUsed + echoShift.cooldown > now) {
-        // Not ready yet
-        return false;
-    }
-    
-    // Freeze current path and activate echo
+const NEVER_FADE_FRACTION = 0.5;
+const TWIN_ECHO_FRACTION = 0.5;
+
+// Shared replay setup, used by the first activation and by any queued one.
+function startEchoReplay(powerScale = 1) {
     echoShift.isActive = true;
-    echoShift.startTime = now;
     echoShift.path = player.getMovementPath();
     if (echoShift.path.length < 2) {
-        // No trail to replay: do not activate and do not burn the cooldown
         echoShift.isActive = false;
+        echoShift.queued = false;
+        echoShift.powerScale = 1;
         return false;
     }
     echoShift.elapsed = 0;
     echoShift.replayProgress = 0;
     echoShift.damagedEnemies = new Set();
+    echoShift.powerScale = powerScale;
+    echoShift.queued = false;
+    echoShift.queuedPowerScale = 1;
+    return true;
+}
+
+export function activateEchoShift() {
+    const now = getRunTime();
+
+    // Quick Recall: one extra Echo can be readied mid-replay, at full power
+    if (echoShift.isActive && perks.has('quickRecall') && !echoShift.queued) {
+        echoShift.queued = true;
+        echoShift.queuedPowerScale = 1;
+        audio.play('echo_shift');
+        return true;
+    }
+
+    if (echoShift.lastUsed + echoShift.cooldown > now) {
+        // Not ready yet
+        return false;
+    }
+
+    // Freeze current path and activate echo
+    echoShift.startTime = now;
+    if (!startEchoReplay(1)) {
+        // No trail to replay: do not activate and do not burn the cooldown
+        return false;
+    }
+    // Twin Echo rides along with every activation, so the second replay costs
+    // nothing extra to queue and comes back at half power
+    if (perks.has('twinEcho')) {
+        echoShift.queued = true;
+        echoShift.queuedPowerScale = TWIN_ECHO_FRACTION;
+    }
     echoShift.lastUsed = now;
     audio.play('echo_shift');
     return true;
@@ -705,6 +906,12 @@ export function applyPlayerStats(options = {}) {
         echoShift.duration = stats.echoDuration;
         echoShift.cooldown = stats.echoCooldown;
     }
+
+    // Perks are a pure function of the resolved stats, so recomputing here
+    // keeps them in lockstep with the ladder no matter who spent the point.
+    const newlyUnlocked = perks.refresh();
+    for (const perk of newlyUnlocked) perkUnlockQueue.push(perk);
+    if (newlyUnlocked.length) audio.play('stat-upgrade');
 }
 
 // Stat points are spent through the UI, which reports back here

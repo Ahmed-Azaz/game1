@@ -1,6 +1,7 @@
 // Player entity - movement, stats, and Echo Shift mechanic
 import * as audio from './audio.js';
 import * as game from './game.js';
+import { perks } from './perks.js';
 import { spawnHit, triggerScreenShake } from './visual-effects.js';
 
 export const player = {
@@ -28,6 +29,17 @@ export const player = {
     hurtFlashUntil: 0,
     invulnUntil: 0,
     
+    // Perk bookkeeping
+    stonewallUsed: false, // Stonewall, once per wave
+    secondsSinceDamage: 0, // Slipstream clean-play timer
+    regenDelay: 0, // Regen hold-off after taking a hit
+    killSpeedTimer: 0, // Momentum window left
+    killStacks: 0, // Momentum stacks
+    secondWindTimer: 0,
+    attackCounter: 0, // Double Tap cadence
+    hitStreak: 0, // Flurry charge progress
+    flurryCharges: 0, // Flurry attacks that skip the cooldown
+
     // Movement state
     isMoving: false,
     moveDirection: { x: 0, y: 0 }, // -1, 0, or 1
@@ -49,6 +61,15 @@ export const player = {
         this.movementHistory = [];
         this.lastMoveTime = -Infinity;
         this.lastAttackTime = -Infinity;
+        this.stonewallUsed = false;
+        this.secondsSinceDamage = 0;
+        this.regenDelay = 0;
+        this.killSpeedTimer = 0;
+        this.killStacks = 0;
+        this.secondWindTimer = 0;
+        this.attackCounter = 0;
+        this.hitStreak = 0;
+        this.flurryCharges = 0;
     },
     
     update(deltaTime, keysDown, joystickVector) {
@@ -75,8 +96,8 @@ export const player = {
             dy /= length;
         }
 
-        this.vx = dx * this.moveSpeed;
-        this.vy = dy * this.moveSpeed;
+        this.vx = dx * this.effectiveMoveSpeed();
+        this.vy = dy * this.effectiveMoveSpeed();
         
         if (dx !== 0) this.moveDirection.x = Math.sign(dx);
         if (dy !== 0) this.moveDirection.y = Math.sign(dy);
@@ -89,9 +110,19 @@ export const player = {
         this.y = Math.max(margin, Math.min(game.canvasHeight - margin, this.y + this.vy * deltaTime));
         
         // HP Regeneration
-        if (this.hp < this.maxHP && this.hp > 0 && this.hpRegen > 0) {
+        //
+        // Regeneration holds off briefly after taking a hit, so a player being
+        // worn down cannot out-heal the damage they are receiving. Bleedout
+        // removes that hold-off for players who overcommit to regen.
+        const regenDelayed = this.regenDelay > 0 && !perks.has('bleedout');
+        if (this.regenDelay > 0) {
+            this.regenDelay = Math.max(0, this.regenDelay - deltaTime);
+        }
+        if (this.hp < this.maxHP && this.hp > 0 && this.hpRegen > 0 && !regenDelayed) {
             this.hp = Math.min(this.maxHP, this.hp + this.hpRegen * deltaTime);
         }
+
+        this.updatePerkTimers(deltaTime);
         
         // Record movement history for Echo Shift (run clock, so pausing does
         // not age the trail out)
@@ -106,6 +137,51 @@ export const player = {
         }
     },
     
+    // Effective speed after the two move speed perks stack on top of the stat
+    effectiveMoveSpeed() {
+        let speed = this.moveSpeed;
+        // Slipstream: staying clean pays off
+        if (perks.has('slipstream') && this.secondsSinceDamage >= SLIPSTREAM_AFTER) {
+            speed *= 1 + SLIPSTREAM_BONUS;
+        }
+        // Momentum: kills build a burst that collapses if the killing stops
+        if (this.killStacks > 0) {
+            speed *= 1 + MOMENTUM_PER_STACK * this.killStacks;
+        }
+        return speed;
+    },
+
+    // Timers that only exist because a perk reads them.
+    updatePerkTimers(deltaTime) {
+        this.secondsSinceDamage += deltaTime;
+
+        if (this.killStacks > 0) {
+            this.killSpeedTimer -= deltaTime;
+            if (this.killSpeedTimer <= 0) {
+                this.killStacks = 0;
+                this.killSpeedTimer = 0;
+            }
+        }
+
+        if (perks.has('secondWind')) {
+            this.secondWindTimer += deltaTime;
+            if (this.secondWindTimer >= SECOND_WIND_PERIOD) {
+                this.secondWindTimer = 0;
+                if (this.hp > 0 && this.hp < this.maxHP * SECOND_WIND_TRIGGER) {
+                    this.hp = Math.min(this.maxHP, Math.max(this.hp, this.maxHP * SECOND_WIND_RESTORE));
+                    game.updateUIStats();
+                }
+            }
+        }
+    },
+
+    // Momentum feeds off kills, wherever the kill came from
+    onKill() {
+        if (!perks.has('momentum')) return;
+        this.killStacks = Math.min(MOMENTUM_MAX_STACKS, this.killStacks + 1);
+        this.killSpeedTimer = MOMENTUM_WINDOW;
+    },
+
     getMovementPath() {
         // Return a copy of the movement history for Echo Shift
         // Filter to last 5 seconds of run time
@@ -124,14 +200,32 @@ export const player = {
         return result;
     },
     
-    takeDamage(amount) {
+    takeDamage(amount, source = 'contact') {
         const now = performance.now() / 1000;
         if (now < this.invulnUntil) return;
 
-        this.hp -= amount;
+        // Juggernaut: bodies cannot touch you while you are still healthy, so
+        // the reward for a big HP pool is also the reward for keeping it
+        if (source === 'contact' && perks.has('juggernaut') && this.hp > this.maxHP * JUGGERNAUT_THRESHOLD) {
+            return;
+        }
+
+        let incoming = amount;
+
+        // Stonewall: the first lethal hit of a wave is survived
+        if (this.hp - incoming <= 0 && perks.has('stonewall') && !this.stonewallUsed) {
+            this.stonewallUsed = true;
+            incoming = Math.max(0, this.hp - 1);
+            triggerScreenShake(9, 0.3);
+            audio.play('player_damage');
+        }
+
+        this.hp -= incoming;
         if (this.hp < 0) this.hp = 0;
         this.hurtFlashUntil = now + 0.2;
         this.invulnUntil = now + 0.45;
+        this.secondsSinceDamage = 0;
+        this.regenDelay = perks.has('bleedout') ? 0 : REGEN_HOLD_OFF;
         triggerScreenShake(5, 0.14);
         
         // Play pain sound
@@ -156,55 +250,160 @@ export const player = {
     // arena never turns an upgrade into wasted damage.
     autoAttack(enemyList) {
         const now = performance.now() / 1000;
-        if (now - this.lastAttackTime < 1 / this.attackSpeed) return;
-        
+
+        // Echo Storm: a live replay is the reward for a short cooldown
+        const rateMultiplier = (game.echoShift && game.echoShift.isActive && perks.has('echoStorm')) ? 2 : 1;
+        // Flurry charges ignore the cooldown entirely
+        const usingFlurry = this.flurryCharges > 0;
+        if (!usingFlurry && now - this.lastAttackTime < 1 / (this.attackSpeed * rateMultiplier)) return;
+
         const targets = [];
         const rangeSquared = this.attackRange * this.attackRange;
-        
+        const inRangeIds = new Set();
+
         for (const enemy of enemyList) {
             const dx = enemy.x - this.x;
             const dy = enemy.y - this.y;
             const distanceSquared = dx * dx + dy * dy;
-            
-            if (distanceSquared < rangeSquared) targets.push({ enemy, distanceSquared });
+
+            if (distanceSquared < rangeSquared) {
+                targets.push({ enemy, distanceSquared });
+                inRangeIds.add(enemy.id);
+            }
         }
-        
+
         if (!targets.length) return;
-        
+
         // Nearest first, so a volley always spends itself on the closest threats
         targets.sort((a, b) => a.distanceSquared - b.distanceSquared);
-        
+
         const shots = Math.max(1, Math.round(this.multishot));
         const inRange = targets.map((t) => t.enemy);
         const hitTargets = inRange.slice(0, shots);
         // Fewer enemies in range than shots: the extra shots stack on the nearest
         for (let i = hitTargets.length; i < shots; i++) hitTargets.push(inRange[0]);
-        
-        for (const enemy of hitTargets) {
-            // Deal damage
-            const { damage, critical } = this.calculateDamage(this.attackPower);
-            enemy.hp -= damage;
-            enemy.hitFlashUntil = performance.now() / 1000 + 0.12;
-            spawnHit(enemy.x, enemy.y, enemy.color, damage, critical);
-            
-            // Track damage
-            game.addDamageDealt(damage);
-            
-            // Visual effect and sound
-            audio.play('hit');
+
+        // Double Tap: every 4th swing throws a second round
+        this.attackCounter++;
+        if (perks.has('doubleTap') && this.attackCounter % DOUBLE_TAP_EVERY === 0) {
+            hitTargets.push(inRange[0]);
         }
-        
-        // Cooldown
-        this.lastAttackTime = performance.now() / 1000;
+
+        const alreadyHit = new Set();
+        let shotIndex = 0;
+        for (const enemy of hitTargets) {
+            this.fireVolleyShot(enemy, shotIndex++, 1, enemyList, inRangeIds, alreadyHit);
+        }
+
+        // Bounce: the 3rd shot of the volley ricochets into someone not hit yet
+        if (perks.has('bounce') && shots >= BOUNCE_SHOT_INDEX + 1) {
+            const spare = inRange.find((enemy) => !alreadyHit.has(enemy.id));
+            if (spare) this.fireVolleyShot(spare, 0, BOUNCE_FRACTION, enemyList, inRangeIds, alreadyHit);
+        }
+
+        this.lastAttackTime = now;
+        if (usingFlurry) this.flurryCharges--;
+
+        // Flurry charges itself from a clean run of swings
+        this.hitStreak++;
+        if (perks.has('flurry') && this.hitStreak >= FLURRY_STREAK) {
+            this.hitStreak = 0;
+            this.flurryCharges = FLURRY_CHARGES;
+        }
+    },
+
+    // One shot at one enemy. Pierce fans the shot out along its own line, so a
+    // single aimed round can clear a column of bodies.
+    fireVolleyShot(enemy, shotIndex, scale, enemyList, inRangeIds, alreadyHit) {
+        const { damage, critical } = this.calculateDamage(this.attackPower);
+        // Every enemy a shot touches is recorded, so Pierce does not re-hit one
+        // and Bounce can only pick a genuinely untouched target
+        const shoot = (target) => {
+            alreadyHit.add(target.id);
+            this.applyShotDamage(target, shotIndex, damage * scale, critical);
+        };
+
+        shoot(enemy);
+
+        if (perks.has('pierce')) {
+            const dx = enemy.x - this.x;
+            const dy = enemy.y - this.y;
+            if (Math.hypot(dx, dy) > 0.01) {
+                const dirX = dx / Math.hypot(dx, dy);
+                const dirY = dy / Math.hypot(dx, dy);
+                // The shot keeps travelling to the edge of the attack range, so
+                // whatever stands behind the target is still on the line
+                for (const other of enemyList) {
+                    if (other === enemy || other.hp <= 0) continue;
+                    if (alreadyHit.has(other.id) || !inRangeIds.has(other.id)) continue;
+                    const ox = other.x - this.x;
+                    const oy = other.y - this.y;
+                    const along = ox * dirX + oy * dirY;
+                    if (along <= 0 || along > this.attackRange) continue;
+                    const perpendicular = Math.abs(ox * -dirY + oy * dirX);
+                    if (perpendicular < other.size + PIERCE_WIDTH) shoot(other);
+                }
+            }
+        }
+    },
+
+    // Turns a rolled shot into actual damage, then applies the perks that read
+    // the target's state (Executioner) or the shot's position in the volley
+    // (Storm). `damage` is already the crit-adjusted number from calculateDamage.
+    applyShotDamage(enemy, shotIndex, damage, critical) {
+        // Storm: every shot past the first hits harder
+        if (perks.has('storm') && shotIndex > 0) damage *= 1 + STORM_PER_EXTRA_SHOT;
+
+        // Executioner: finish anything already hurt
+        if (perks.has('executioner') && enemy.hp > 0 && enemy.hp / enemy.maxHP < EXECUTIONER_THRESHOLD) {
+            damage *= 2;
+        }
+
+        const dealt = game.damageEnemy(enemy, damage, { critical, source: 'attack' });
+        spawnHit(enemy.x, enemy.y, enemy.color, dealt, critical);
+        game.addDamageDealt(dealt);
+        audio.play('hit');
+
+        // Bloodthirst: crits are the sustain
+        if (critical && perks.has('bloodthirst')) {
+            this.heal(BLOODTHIRST_HEAL);
+            game.updateUIStats();
+        }
+
+        return dealt;
     },
     
     // Returns the crit flag with the damage so the caller never has to infer
     // it from the numbers (a crit at exactly 100% would look like a normal hit).
     calculateDamage(attackPower) {
         const critical = Math.random() * 100 < this.criticalChance;
+        // Weak Spot makes the crits themselves meaner, not just more frequent
+        const critPercent = this.criticalDamage + (critical && perks.has('weakSpot') ? WEAK_SPOT_CRIT_BONUS : 0);
         return {
-            damage: critical ? attackPower * (this.criticalDamage / 100) : attackPower,
+            damage: critical ? attackPower * (critPercent / 100) : attackPower,
             critical
         };
     }
 };
+
+// Perk tuning values, kept beside the code that reads them
+const SLIPSTREAM_AFTER = 3;
+const SLIPSTREAM_BONUS = 0.25;
+const MOMENTUM_PER_STACK = 0.08;
+const MOMENTUM_MAX_STACKS = 10;
+const MOMENTUM_WINDOW = 2;
+const REGEN_HOLD_OFF = 1.2;
+const JUGGERNAUT_THRESHOLD = 0.5;
+const SECOND_WIND_PERIOD = 20;
+const SECOND_WIND_TRIGGER = 0.3;
+const SECOND_WIND_RESTORE = 0.6;
+const EXECUTIONER_THRESHOLD = 0.25;
+const DOUBLE_TAP_EVERY = 4;
+const FLURRY_STREAK = 6;
+const FLURRY_CHARGES = 3;
+const PIERCE_WIDTH = 6;
+const STORM_PER_EXTRA_SHOT = 0.15;
+const BOUNCE_FRACTION = 0.5;
+const BOUNCE_SHOT_INDEX = 2;
+const WEAK_SPOT_CRIT_BONUS = 50;
+const BLOODTHIRST_HEAL = 3;

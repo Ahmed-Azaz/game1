@@ -2,6 +2,7 @@
 import * as game from './game.js';
 import { player } from './player.js';
 import { upgradeSystem } from './upgrades.js';
+import { perks } from './perks.js';
 import * as audio from './audio.js';
 import { saveSystem, persistGameSettings } from './save.js';
 
@@ -21,6 +22,38 @@ export const ui = {
 };
 
 let statScreenMode = 'manual';
+let activeTab = 'stats';
+// Perks unlocked since the player last looked, so the reward is never silent
+let pendingUnlocks = [];
+// Opening from the pause menu has to stop the run exactly once, not on every
+// re-render of the screen
+let gameplayStoppedForScreen = false;
+
+// One description of every upgradeable stat, shared by the Stats and Perks tabs
+// so the two views can never drift apart.
+const STAT_ROWS = [
+    { key: 'hp', label: 'HP', format: 'hp' },
+    { key: 'hpRegen', label: 'HP Regen', format: 'hpRegen' },
+    { key: 'moveSpeed', label: 'Move Speed', format: 'moveSpeed' },
+    { key: 'attackPower', label: 'Attack Power', format: 'attackPower' },
+    { key: 'attackSpeed', label: 'Attack Speed', format: 'attackSpeed' },
+    { key: 'attackRange', label: 'Attack Range', format: 'attackRange' },
+    { key: 'criticalChance', label: 'Critical Chance', format: 'criticalChance' },
+    { key: 'criticalDamage', label: 'Critical Damage', format: 'criticalDamage' },
+    { key: 'echoPower', label: 'Echo Power', format: 'echoPower' },
+    { key: 'echoDuration', label: 'Echo Duration', format: 'echoDuration' },
+    { key: 'echoCooldown', label: 'Echo Cooldown', format: 'echoCooldown' },
+    { key: 'multishot', label: 'Multishot', format: 'multishot' }
+];
+
+// Number keys 1-12 buy a point in the matching stat, in screen order
+const QUICK_KEY_STATS = STAT_ROWS.map((stat) => stat.key);
+
+const UPGRADE_TABS = [
+    { id: 'stats', label: 'Stats' },
+    { id: 'perks', label: 'Perks' },
+    { id: 'skills', label: 'Skills' }
+];
 
 export function tickHUD() {
     if (!game.gameState) return;
@@ -31,7 +64,6 @@ export function openLevelUpStatScreen() {
     statScreenMode = 'levelUp';
     renderStatScreen();
 }
-
 export function beginRun() {
     document.getElementById('onboarding').style.display = 'none';
     // Defensive: an overlay left visible would keep the input layer on the title state
@@ -50,6 +82,9 @@ export function closeStatScreen() {
         container.innerHTML = '';
     }
     statScreenMode = 'manual';
+    activeTab = 'stats';
+    pendingUnlocks = [];
+    gameplayStoppedForScreen = false;
 }
 
 function refreshTitleBest() {
@@ -75,6 +110,14 @@ function setUpEventListeners() {
     document.getElementById('stat-screen-container').addEventListener('click', (e) => {
         if (e.target.id === 'continue-btn') {
             closeStatScreenAndResume();
+        }
+        // Tab switching re-renders in place, so the header, points and pause
+        // state stay exactly as they were
+        const tab = e.target.dataset && e.target.dataset.tab;
+        if (tab) {
+            activeTab = tab;
+            pendingUnlocks = [];
+            renderStatScreen();
         }
     });
 
@@ -176,11 +219,12 @@ function setUpEventListeners() {
     document.addEventListener('keydown', (e) => {
         // Number keys 1-12 for quick stat allocation while stat screen is open
         const statScreen = document.getElementById('stat-screen-container');
-        if (statScreen && statScreen.style.display === 'block') {
+        // Only on the Stats tab: on Perks or Skills those keys have no meaning,
+        // and silently buying a point the player cannot see would be a trap
+        if (statScreen && statScreen.style.display === 'block' && activeTab === 'stats') {
             const num = parseInt(e.key);
-            if (num >= 1 && num <= 12) {
-                const keys = ['hp', 'hpRegen', 'moveSpeed', 'attackPower', 'attackSpeed', 'attackRange', 'criticalChance', 'criticalDamage', 'echoPower', 'echoDuration', 'echoCooldown', 'multishot'];
-                if (keys[num - 1] && upgradeSystem.addPoint(keys[num - 1])) {
+            if (num >= 1 && num <= QUICK_KEY_STATS.length) {
+                if (upgradeSystem.addPoint(QUICK_KEY_STATS[num - 1])) {
                     game.applyPlayerStats();
                     audio.play('stat-upgrade');
                     renderStatScreen();
@@ -251,48 +295,87 @@ function setText(id, value) {
     hudCache.set(id, value);
 }
 
-// Render the stat screen
+// Render the upgrade screen: one window with Stats, Perks and Skills tabs
 function renderStatScreen() {
     const container = document.getElementById('stat-screen-container');
     if (!container) return;
-    
-    const stats = upgradeSystem.getStats();
+
+    // Drain the queue here so perks unlocked by any path (spending a point, a
+    // level up, a fresh run) get celebrated on the next paint. Always append:
+    // a second unlock landing while the first is still on screen has to wait
+    // its turn, not disappear behind it.
+    pendingUnlocks = pendingUnlocks.concat(game.consumePerkUnlocks());
+
     const availablePoints = upgradeSystem.getAvailablePoints();
-    
-    let html = `
+
+    const html = `
         <div id="stat-screen" class="screen" style="display: block;">
             <div class="screen-overlay"></div>
             <div class="stat-window">
-                <h2>STAT SCREEN</h2>
+                <h2>UPGRADES</h2>
                 <div class="player-info">
-                    Level ${game.gameState.level}<br>
-                    XP: ${Math.floor(game.gameState.xp)} / ${game.gameState.xpRequired}
+                    Level ${game.gameState.level} &middot; XP: ${Math.floor(game.gameState.xp)} / ${game.gameState.xpRequired}
                 </div>
-                
-                <div class="stats-grid">
+                <div class="upgrade-tabs">
+                    ${UPGRADE_TABS.map((tab) => `
+                        <button class="tab-btn ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}</button>
+                    `).join('')}
+                </div>
+                ${renderUnlockBanner()}
+                <div class="upgrade-panel">
+                    ${renderActiveTab()}
+                </div>
+                <div class="stat-points">
+                    Available Stat Points: ${availablePoints}<br>
+                    <button id="continue-btn">Continue</button>
+                </div>
+            </div>
+        </div>
     `;
-    
-    // Render all 12 stats
-    const statKeys = [
-        { key: 'hp', label: 'HP', format: 'hp' },
-        { key: 'hpRegen', label: 'HP Regen', format: 'hpRegen' },
-        { key: 'moveSpeed', label: 'Move Speed', format: 'moveSpeed' },
-        { key: 'attackPower', label: 'Attack Power', format: 'attackPower' },
-        { key: 'attackSpeed', label: 'Attack Speed', format: 'attackSpeed' },
-        { key: 'attackRange', label: 'Attack Range', format: 'attackRange' },
-        { key: 'criticalChance', label: 'Critical Chance', format: 'criticalChance' },
-        { key: 'criticalDamage', label: 'Critical Damage', format: 'criticalDamage' },
-        { key: 'echoPower', label: 'Echo Power', format: 'echoPower' },
-        { key: 'echoDuration', label: 'Echo Duration', format: 'echoDuration' },
-        { key: 'echoCooldown', label: 'Echo Cooldown', format: 'echoCooldown' },
-        { key: 'multishot', label: 'Multishot', format: 'multishot' }
-    ];
-    
-    statKeys.forEach((stat, index) => {
+
+    container.innerHTML = html;
+    container.style.display = 'block';
+
+    // Opening the upgrade screen from the pause menu must stop the run too, so
+    // the portal is told gameplay ended while the player is allocating points.
+    if (statScreenMode === 'paused' && !gameplayStoppedForScreen) {
+        game.gameplayStop();
+        gameplayStoppedForScreen = true;
+    }
+}
+
+function renderActiveTab() {
+    if (activeTab === 'perks') return renderPerksTab();
+    if (activeTab === 'skills') return renderSkillsTab();
+    return renderStatsTab();
+}
+
+function renderUnlockBanner() {
+    if (!pendingUnlocks.length) return '';
+    const rows = pendingUnlocks.map((perk) => `
+        <div class="perk-banner-row">
+            <span class="perk-banner-name">${perk.name}</span>
+            <span class="perk-banner-desc">${perk.description}</span>
+        </div>
+    `).join('');
+    return `
+        <div class="perk-banner">
+            <div class="perk-banner-title">Perk unlocked</div>
+            ${rows}
+        </div>
+    `;
+}
+
+function renderStatsTab() {
+    const stats = upgradeSystem.getStats();
+    const availablePoints = upgradeSystem.getAvailablePoints();
+
+    let html = '<div class="stats-grid">';
+
+    STAT_ROWS.forEach((stat) => {
         const current = stats[stat.key];
         const def = upgradeSystem.stats[stat.key];
         const base = def.base;
-        const points = def.points;
         const bonus = calculateBonus(stat.key, current, base);
 
         let formatText = current;
@@ -317,7 +400,7 @@ function renderStatScreen() {
         } else if (stat.format === 'multishot') {
             formatText = `${current} shot${current === 1 ? '' : 's'}`;
         }
-        
+
         // A stat can cost more than one point, so the button has to compare the
         // balance against this stat's cost rather than against zero.
         const cost = upgradeSystem.statCost(stat.key);
@@ -339,23 +422,93 @@ function renderStatScreen() {
             </div>
         `;
     });
-    
-    html += `
+
+    html += '</div>';
+    return html;
+}
+
+// Perks tab. Locked perks show only their requirement: the milestone is
+// advertised, the effect is not.
+function renderPerksTab() {
+    let html = `
+        <div class="perks-intro">
+            Overcommit points into a single stat to unlock its perks.
+        </div>
+        <div class="perks-grid">
+    `;
+
+    for (const stat of STAT_ROWS) {
+        const bonus = perks.bonusPercent(stat.key);
+        const next = perks.getNextLocked(stat.key);
+        const progress = next ? Math.max(0, Math.min(1, bonus / next.threshold)) : 1;
+        const sign = stat.key === 'echoCooldown' ? '-' : '+';
+
+        html += `
+            <div class="perk-group">
+                <div class="perk-group-head">
+                    <span class="perk-stat-name">${stat.label}</span>
+                    <span class="perk-stat-bonus">${sign}${trim(Math.abs(bonus))}%</span>
                 </div>
-                <div class="stat-points">
-                    Available Stat Points: ${availablePoints}<br>
-                    <button id="continue-btn">Continue</button>
+                <div class="perk-progress"><div class="perk-progress-fill" style="width: ${(progress * 100).toFixed(1)}%"></div></div>
+                ${perks.getForStat(stat.key).map((perk) => `
+                    <div class="perk-slot ${perk.unlocked ? 'unlocked' : 'locked'}">
+                        <span class="perk-name">${perk.unlocked ? perk.name : '???'}</span>
+                        <span class="perk-desc">${perk.unlocked ? perk.description : 'Effect unknown'}</span>
+                        <span class="perk-req">${perk.unlocked
+                            ? 'Unlocked'
+                            : `Requires ${sign}${trim(perk.threshold)}% in ${stat.label}`}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+// Skills tab. Echo Shift lives here so future skills have an obvious home; the
+// stats that drive it stay on the Stats tab.
+function renderSkillsTab() {
+    const echo = game.echoShift;
+    let status = 'Ready';
+    if (echo && game.gameState && !game.gameState.isPaused) {
+        const remaining = echo.lastUsed + echo.cooldown - game.getRunTime();
+        if (remaining > 0) status = `Recharging (${remaining.toFixed(1)}s)`;
+    }
+
+    return `
+        <div class="skills-intro">
+            Skills are triggered while you are playing. The stats that drive them
+            are on the Stats tab.
+        </div>
+        <div class="skills-grid">
+            <div class="skill-card">
+                <div class="skill-head">
+                    <span class="skill-name">Echo Shift</span>
+                    <span class="skill-key">SPACE</span>
                 </div>
+                <p class="skill-desc">
+                    Freeze the path you just walked and send a damaging echo back
+                    along it. Every enemy the trail sweeps takes your Attack Power
+                    times Echo Power.
+                </p>
+                <div class="skill-stats">
+                    <span class="skill-stat">Power: ${player.echoPower.toFixed(2)}x</span>
+                    <span class="skill-stat">Duration: ${player.echoDuration.toFixed(1)}s</span>
+                    <span class="skill-stat">Cooldown: ${player.echoCooldown.toFixed(1)}s</span>
+                    <span class="skill-stat">Status: ${status}</span>
+                </div>
+            </div>
+            <div class="skill-card locked">
+                <div class="skill-head">
+                    <span class="skill-name">???</span>
+                    <span class="skill-key">LOCKED</span>
+                </div>
+                <p class="skill-desc">More skills are on the way.</p>
             </div>
         </div>
     `;
-    
-    container.innerHTML = html;
-    container.style.display = 'block';
-    
-    // Opening the stat screen from the pause menu must stop the run too, so the
-    // portal is told gameplay ended while the player is allocating points.
-    if (statScreenMode === 'paused') game.gameplayStop();
 }
 
 function closeStatScreenAndResume() {

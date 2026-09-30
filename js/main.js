@@ -1,5 +1,5 @@
 // Main entry point - game bootstrap and state management
-import { initGame, update as gameUpdate, echoShift, getRunTime, gameplayStart, gameplayStop } from './game.js';
+import { initGame, update as gameUpdate, echoShift, getRunTime, gameplayStart, gameplayStop, isMarked } from './game.js';
 import { player } from './player.js';
 import { resetAll as resetEnemies, getActiveEnemies } from './enemies.js';
 import { ui } from './ui.js';
@@ -261,6 +261,21 @@ function drawEnemy(ctx, e, t) {
         ctx.fillRect(e.x - bw / 2, e.y - r - 12, bw, 4);
         ctx.fillStyle = q < .3 ? '#ff8b87' : '#70f4d1';
         ctx.fillRect(e.x - bw / 2, e.y - r - 12, bw * q, 4);
+    }
+
+    // Marked enemies take extra damage from everything, so the ring has to be
+    // unmissable: it pulses for as long as the mark holds
+    if (isMarked(e, t)) {
+        ctx.save();
+        ctx.strokeStyle = '#7dd7ef';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = .55 + Math.sin(t * 6) * .25;
+        ctx.shadowColor = '#7dd7ef';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, r * 1.28, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
     }
 }
 
