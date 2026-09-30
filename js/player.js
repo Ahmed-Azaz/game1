@@ -172,10 +172,10 @@ export const player = {
         
         if (nearestEnemy) {
             // Deal damage
-            const damage = this.calculateDamage(this.attackPower);
+            const { damage, critical } = this.calculateDamage(this.attackPower);
             nearestEnemy.hp -= damage;
             nearestEnemy.hitFlashUntil = performance.now() / 1000 + 0.12;
-            spawnHit(nearestEnemy.x, nearestEnemy.y, nearestEnemy.color, damage, damage > this.attackPower);
+            spawnHit(nearestEnemy.x, nearestEnemy.y, nearestEnemy.color, damage, critical);
             
             // Track damage
             game.addDamageDealt(damage);
@@ -188,11 +188,13 @@ export const player = {
         }
     },
     
+    // Returns the crit flag with the damage so the caller never has to infer
+    // it from the numbers (a crit at exactly 100% would look like a normal hit).
     calculateDamage(attackPower) {
-        // Critical hit check
-        if (Math.random() * 100 < this.criticalChance) {
-            return attackPower * (this.criticalDamage / 100);
-        }
-        return attackPower;
+        const critical = Math.random() * 100 < this.criticalChance;
+        return {
+            damage: critical ? attackPower * (this.criticalDamage / 100) : attackPower,
+            critical
+        };
     }
 };

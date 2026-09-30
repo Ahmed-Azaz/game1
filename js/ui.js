@@ -290,23 +290,26 @@ function renderStatScreen() {
     
     statKeys.forEach((stat, index) => {
         const current = stats[stat.key];
-        const base = upgradeSystem.stats[stat.key].base;
-        const points = upgradeSystem.stats[stat.key].points;
-        const bonus = calculateBonus(stat.key, points);
-        
+        const def = upgradeSystem.stats[stat.key];
+        const base = def.base;
+        const points = def.points;
+        const bonus = calculateBonus(stat.key);
+
         let formatText = current;
         if (stat.format === 'hpRegen') {
             formatText = `${current} HP/sec`;
         } else if (stat.format === 'moveSpeed') {
             formatText = `${current} px/s`;
         } else if (stat.format === 'attackSpeed') {
-            formatText = `${current.toFixed(1)}/sec`;
+            formatText = `${current.toFixed(2)}/sec`;
+        } else if (stat.format === 'attackPower') {
+            formatText = `${current} dmg`;
         } else if (stat.format === 'criticalChance') {
             formatText = `${current.toFixed(1)}%`;
         } else if (stat.format === 'criticalDamage') {
-            formatText = `${current.toFixed(1)}%`;
+            formatText = `${current.toFixed(0)}%`;
         } else if (stat.format === 'echoPower') {
-            formatText = `${current.toFixed(1)}x`;
+            formatText = `${current.toFixed(2)}x`;
         } else if (stat.format === 'echoDuration') {
             formatText = `${current.toFixed(1)} sec`;
         } else if (stat.format === 'echoCooldown') {
@@ -316,14 +319,19 @@ function renderStatScreen() {
         }
         
         const isDisabled = availablePoints <= 0;
-        
+        // Tells the player what a single point is worth now, so percentage
+        // scaling stays readable instead of looking like a flat bonus.
+        const perPoint = def.percentPerPoint
+            ? `+${trim(def.percentPerPoint * 100)}%`
+            : `${trim(def.increment)}`;
+
         html += `
             <div class="stat-row">
                 <span class="stat-name">${stat.label}</span>
                 <span class="stat-value">${formatText}</span>
                 <span class="stat-base">Base: ${base}</span>
                 <span class="stat-bonus">Bonus: ${bonus}</span>
-                <button class="stat-plus ${isDisabled ? 'disabled' : ''}" data-stat="${stat.key}" ${isDisabled ? 'disabled' : ''}>+</button>
+                <button class="stat-plus ${isDisabled ? 'disabled' : ''}" data-stat="${stat.key}" title="Per point: ${perPoint}" ${isDisabled ? 'disabled' : ''}>+</button>
             </div>
         `;
     });
@@ -357,33 +365,27 @@ function closeStatScreenAndResume() {
     }
 }
 
-function calculateBonus(statKey, points) {
+// Bonus text for the stat screen. Percentage stats report the multiplier they
+// add; flat stats report the raw amount.
+function calculateBonus(statKey) {
     const stat = upgradeSystem.stats[statKey];
-    if (stat.points === 0) return '0%';
-    
-    if (statKey === 'moveSpeed') {
+    if (stat.points === 0) return stat.percentPerPoint ? '0%' : '0';
+
+    if (stat.percentPerPoint) {
         const percent = stat.points * stat.percentPerPoint * 100;
-        return `+${percent.toFixed(0)}%`;
-    } else if (statKey === 'criticalChance') {
-        const percent = stat.points * stat.increment * 100;
-        return `+${percent.toFixed(1)}%`;
-    } else if (statKey === 'criticalDamage') {
-        const percent = stat.points * stat.increment;
-        return `+${percent.toFixed(1)}%`;
-    } else if (statKey === 'echoPower') {
-        const value = stat.points * stat.increment;
-        return `+${value.toFixed(1)}`;
-    } else if (statKey === 'echoDuration') {
-        const value = stat.points * stat.increment;
-        return `+${value.toFixed(1)}s`;
-    } else if (statKey === 'echoCooldown') {
-        const value = Math.abs(stat.points * stat.increment);
-        return `-${value.toFixed(1)}s`;
-    } else if (statKey === 'fragmentMagnet') {
-        const value = stat.points * stat.increment;
-        return `+${value} px`;
+        return `+${trim(percent)}%`;
     }
-    return '0';
+    if (statKey === 'echoCooldown') {
+        return `-${trim(Math.abs(stat.points * stat.increment))}s`;
+    }
+    if (statKey === 'fragmentMagnet') {
+        return `+${trim(stat.points * stat.increment)} px`;
+    }
+    return `+${trim(stat.points * stat.increment)}`;
+}
+
+function trim(value) {
+    return String(Math.round(value * 100) / 100);
 }
 
 // Update Echo Shift indicator

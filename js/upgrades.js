@@ -1,40 +1,41 @@
-// Upgrade/stat system - 12 RPG stats with meaningful effects
+// Upgrade/stat system - 12 RPG stats with meaningful effects.
+// Most offensive and survival stats scale by a percentage of their base value
+// per point spent, so early and late points stay equally meaningful.
 export const upgradeSystem = {
-    // Stat base values (will be modified by points)
     stats: {
         // 1. HP - Maximum health
-        hp: { base: 10, points: 0, increment: 1 },
-        
+        hp: { base: 10, points: 0, percentPerPoint: 0.08, integer: true },
+
         // 2. HP Regeneration - HP/sec when not taking damage
-        hpRegen: { base: 1, points: 0, increment: 1 },
-        
+        hpRegen: { base: 1, points: 0, percentPerPoint: 0.10 },
+
         // 3. Move Speed - Pixels per second
-        moveSpeed: { base: 180, points: 0, increment: 7, percentPerPoint: 0.05 },
-        
+        moveSpeed: { base: 180, points: 0, percentPerPoint: 0.05, round: 'floor' },
+
         // 4. Attack Power - Base damage
-        attackPower: { base: 10, points: 0, increment: 1 },
-        
+        attackPower: { base: 10, points: 0, percentPerPoint: 0.10 },
+
         // 5. Attack Speed - Attacks per second
-        attackSpeed: { base: 1.0, points: 0, increment: 0.15 },
-        
+        attackSpeed: { base: 1.0, points: 0, percentPerPoint: 0.12 },
+
         // 6. Attack Range - Pixels to target
         attackRange: { base: 150, points: 0, increment: 10 },
-        
+
         // 7. Critical Chance - Percent
-        criticalChance: { base: 5, points: 0, increment: 0.75 },
-        
+        criticalChance: { base: 5, points: 0, percentPerPoint: 0.15, min: 0, max: 25 },
+
         // 8. Critical Damage - Percent multiplier
-        criticalDamage: { base: 150, points: 0, increment: 5 },
-        
+        criticalDamage: { base: 150, points: 0, percentPerPoint: 0.03, min: 100, max: 300 },
+
         // 9. Echo Power - Echo damage multiplier
-        echoPower: { base: 1.0, points: 0, increment: 0.5 },
-        
+        echoPower: { base: 1.0, points: 0, percentPerPoint: 0.25, min: 0.5 },
+
         // 10. Echo Duration - Seconds echo lasts
-        echoDuration: { base: 3.0, points: 0, increment: 0.5 },
-        
+        echoDuration: { base: 3.0, points: 0, percentPerPoint: 0.10, min: 1.0 },
+
         // 11. Echo Cooldown - Seconds before echo reuse
         echoCooldown: { base: 15.0, points: 0, increment: -1.0, min: 2.0 },
-        
+
         // 12. Fragment Magnet Range - Pixels to attract fragments
         fragmentMagnet: { base: 150, points: 0, increment: 30 }
     },
@@ -59,63 +60,33 @@ export const upgradeSystem = {
         this.recalculateAllStats();
     },
     
+    // One place decides how a stat grows, so the stat screen and the player
+    // always read the same numbers.
+    resolveStat(def) {
+        const percent = def.percentPerPoint || 0;
+        let value = def.base * (1 + def.points * percent) + (def.increment || 0) * def.points;
+
+        if (def.integer) {
+            value = Math.round(value);
+        } else if (def.round === 'floor') {
+            value = Math.floor(value);
+        } else {
+            // Trims float noise from repeated multiplications
+            value = Math.round(value * 100) / 100;
+        }
+
+        if (def.min !== undefined) value = Math.max(def.min, value);
+        if (def.max !== undefined) value = Math.min(def.max, value);
+        return value;
+    },
+
     recalculateAllStats() {
-        // Recalculate all current values from base + points
         const playerStats = {};
-        
-        // 1. HP: Base + (points * increment)
-        this.stats.hp.current = this.stats.hp.base + (this.stats.hp.points * this.stats.hp.increment);
-        
-        // 2. HP Regeneration: Base + (points * increment)
-        this.stats.hpRegen.current = this.stats.hpRegen.base + (this.stats.hpRegen.points * this.stats.hpRegen.increment);
-        
-        // 3. Move Speed: Base * (1 + points * 5%) - matches example: 180 * 1.15 = 207
-        this.stats.moveSpeed.current = Math.floor(this.stats.moveSpeed.base * (1 + this.stats.moveSpeed.points * this.stats.moveSpeed.percentPerPoint));
-        
-        // 4. Attack Power: Base + (points * increment)
-        this.stats.attackPower.current = this.stats.attackPower.base + (this.stats.attackPower.points * this.stats.attackPower.increment);
-        
-        // 5. Attack Speed: Base + (points * increment)
-        this.stats.attackSpeed.current = this.stats.attackSpeed.base + (this.stats.attackSpeed.points * this.stats.attackSpeed.increment);
-        
-        // 6. Attack Range: Base + (points * increment)
-        this.stats.attackRange.current = this.stats.attackRange.base + (this.stats.attackRange.points * this.stats.attackRange.increment);
-        
-        // 7. Critical Chance: Base% + (points * increment)%
-        this.stats.criticalChance.current = Math.max(0, Math.min(25, this.stats.criticalChance.base + (this.stats.criticalChance.points * this.stats.criticalChance.increment)));
-        
-        // 8. Critical Damage: Base% + (points * increment)%
-        this.stats.criticalDamage.current = Math.max(100, Math.min(300, this.stats.criticalDamage.base + (this.stats.criticalDamage.points * this.stats.criticalDamage.increment)));
-        
-        // 9. Echo Power: Base + (points * increment)
-        this.stats.echoPower.current = Math.max(0.5, this.stats.echoPower.base + (this.stats.echoPower.points * this.stats.echoPower.increment));
-        
-        // 10. Echo Duration: Base + (points * increment) seconds
-        this.stats.echoDuration.current = Math.max(1.0, this.stats.echoDuration.base + (this.stats.echoDuration.points * this.stats.echoDuration.increment));
-        
-        // 11. Echo Cooldown: Base - (points * increment) seconds, min 2.0
-        this.stats.echoCooldown.current = Math.max(this.stats.echoCooldown.min, this.stats.echoCooldown.base + (this.stats.echoCooldown.points * this.stats.echoCooldown.increment));
-        
-        // 12. Fragment Magnet: Base + (points * increment) pixels
-        this.stats.fragmentMagnet.current = this.stats.fragmentMagnet.base + (this.stats.fragmentMagnet.points * this.stats.fragmentMagnet.increment);
-        
-        // Update available points (every level up from Level 2 gives +3)
-        // This is managed in game.js level up logic
-        
-        // Build flat snapshot of current values
-        playerStats.hp = this.stats.hp.current;
-        playerStats.hpRegen = this.stats.hpRegen.current;
-        playerStats.moveSpeed = this.stats.moveSpeed.current;
-        playerStats.attackPower = this.stats.attackPower.current;
-        playerStats.attackSpeed = this.stats.attackSpeed.current;
-        playerStats.attackRange = this.stats.attackRange.current;
-        playerStats.criticalChance = this.stats.criticalChance.current;
-        playerStats.criticalDamage = this.stats.criticalDamage.current;
-        playerStats.echoPower = this.stats.echoPower.current;
-        playerStats.echoDuration = this.stats.echoDuration.current;
-        playerStats.echoCooldown = this.stats.echoCooldown.current;
-        playerStats.fragmentMagnet = this.stats.fragmentMagnet.current;
-        
+        for (const key of Object.keys(this.stats)) {
+            const def = this.stats[key];
+            def.current = this.resolveStat(def);
+            playerStats[key] = def.current;
+        }
         return playerStats;
     },
     
