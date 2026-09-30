@@ -13,7 +13,7 @@ const enemyTemplates = {
         hp: 20,
         speed: 30,
         damage: 3,
-        xp: 15,
+        xp: 45,
         size: 16,
         description: 'Basic enemy - slow, low HP'
     },
@@ -23,7 +23,7 @@ const enemyTemplates = {
         hp: 35,
         speed: 50,
         damage: 5,
-        xp: 25,
+        xp: 75,
         size: 20,
         description: 'Faster enemy - periodically rushes player'
     },
@@ -33,7 +33,7 @@ const enemyTemplates = {
         hp: 10,
         speed: 300,
         damage: 1,
-        xp: 10,
+        xp: 30,
         size: 12,
         description: 'Fragile enemy - appears in groups'
     },
@@ -43,7 +43,7 @@ const enemyTemplates = {
         hp: 80,
         speed: 20,
         damage: 8,
-        xp: 60,
+        xp: 180,
         size: 32,
         description: 'Slow enemy - high HP'
     },
@@ -53,7 +53,7 @@ const enemyTemplates = {
         hp: 40,
         speed: 45,
         damage: 5,
-        xp: 35,
+        xp: 105,
         size: 24,
         description: 'Reactes to player\'s Echo - avoids echo paths'
     },
@@ -63,7 +63,7 @@ const enemyTemplates = {
         hp: 150,
         speed: 35,
         damage: 12,
-        xp: 100,
+        xp: 300,
         size: 40,
         description: 'Elite enemy - summons minions'
     },
@@ -73,7 +73,7 @@ const enemyTemplates = {
         hp: 500,
         speed: 25,
         damage: 20,
-        xp: 300,
+        xp: 900,
         size: 50,
         description: 'Boss enemy - 3 phases with attack patterns'
     }
