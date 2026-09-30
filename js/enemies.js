@@ -173,6 +173,10 @@ export function updateAll(deltaTime) {
         // Move enemy
         enemy.x += enemy.vx * deltaTime;
         enemy.y += enemy.vy * deltaTime;
+
+        // The standing Echo line is solid: bodies stop here instead of walking
+        // through it, and slide along the wall rather than sticking to it
+        enemy.blockedByEcho = game.applyEchoBarrier(enemy);
         
         // Contact damage
         const distToPlayer = Math.hypot(player.x - enemy.x, player.y - enemy.y);

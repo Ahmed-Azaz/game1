@@ -187,6 +187,10 @@ function drawEchoTrail(ctx, t) {
     if (!echoShift?.isActive || !echoShift.path || echoShift.path.length < 2) return;
     const path = echoShift.path;
     const idx = Math.min(path.length - 1, Math.floor((echoShift.replayProgress || 0) * (path.length - 1)));
+    // Once the fast draw is done the line is standing as a wall, so it holds a
+    // steady pulse instead of reading as a finished sweep
+    const standing = !!echoShift.sweepComplete;
+    const pulse = standing ? 0.5 + Math.sin(t * 5) * 0.18 : 1;
 
     ctx.save();
     ctx.lineCap = 'round';
@@ -196,16 +200,16 @@ function drawEchoTrail(ctx, t) {
     if (echoShift.headX !== undefined) ctx.lineTo(echoShift.headX, echoShift.headY);
 
     ctx.shadowColor = '#36eaff';
-    ctx.shadowBlur = 14;
-    ctx.strokeStyle = 'rgba(31,221,255,.24)';
-    ctx.lineWidth = 15;
+    ctx.shadowBlur = standing ? 18 : 14;
+    ctx.strokeStyle = `rgba(31,221,255,${0.24 * pulse})`;
+    ctx.lineWidth = standing ? 20 : 15;
     ctx.stroke();
     ctx.shadowBlur = 6;
-    ctx.strokeStyle = 'rgba(79,222,235,.76)';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = `rgba(79,222,235,${0.76 * pulse})`;
+    ctx.lineWidth = standing ? 4 : 3;
     ctx.stroke();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(210,239,242,.75)';
+    ctx.strokeStyle = `rgba(210,239,242,${0.75 * pulse})`;
     ctx.lineWidth = 1;
     ctx.stroke();
 
@@ -213,7 +217,7 @@ function drawEchoTrail(ctx, t) {
     ctx.shadowColor = '#36eaff';
     ctx.shadowBlur = 16;
     ctx.beginPath();
-    ctx.arc(echoShift.headX ?? path[0].x, echoShift.headY ?? path[0].y, 5, 0, Math.PI * 2);
+    ctx.arc(echoShift.headX ?? path[0].x, echoShift.headY ?? path[0].y, standing ? 3 : 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 }

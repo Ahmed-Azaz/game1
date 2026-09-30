@@ -489,9 +489,10 @@ function renderSkillsTab() {
                     <span class="skill-key">SPACE</span>
                 </div>
                 <p class="skill-desc">
-                    Freeze the path you just walked and send a damaging echo back
-                    along it. Every enemy the trail sweeps takes your Attack Power
-                    times Echo Power.
+                    Freeze the path you just walked and send an echo back along it.
+                    The line snaps into place almost instantly, then stands as a
+                    solid wall: enemies cannot cross it, and anything pressed
+                    against it keeps burning. The wall holds for the duration.
                 </p>
                 <div class="skill-stats">
                     <span class="skill-stat">Power: ${player.echoPower.toFixed(2)}x</span>

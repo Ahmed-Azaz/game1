@@ -79,6 +79,7 @@ export function initGame() {
         replaySegmentT: 0,
         headX: 0,
         headY: 0,
+        sweepComplete: false, // the fast draw is done and the line is standing
         powerScale: 1, // Twin Echo replays at half power
         queued: false, // Quick Recall / Twin Echo follow-up replay
         queuedPowerScale: 1
@@ -738,18 +739,20 @@ export function updateEchoShift(deltaTime) {
 
     const path = echoShift.path;
     echoShift.elapsed = (echoShift.elapsed || 0) + deltaTime;
-    const progress = Math.min(1, echoShift.elapsed / Math.max(0.001, echoShift.duration));
-    echoShift.replayProgress = progress;
-
-    if (path.length < 2 || progress >= 1) {
+    if (path.length < 2 || echoShift.elapsed >= echoShift.duration) {
         finishEchoShift();
         return;
     }
 
-    if (!echoShift.damagedEnemies) echoShift.damagedEnemies = new Set();
+    // The head races across the whole path in a fraction of a second, so the
+    // line is standing almost immediately instead of trickling in. What is left
+    // of the Echo's life the finished line holds its ground as a barrier.
+    const sweepProgress = Math.min(1, echoShift.elapsed / ECHO_SWEEP_SECONDS);
+    echoShift.replayProgress = sweepProgress;
+    echoShift.sweepComplete = sweepProgress >= 1;
 
     const maxIndex = path.length - 1;
-    const floatIndex = Math.min(maxIndex, progress * maxIndex);
+    const floatIndex = Math.min(maxIndex, sweepProgress * maxIndex);
     const segIndex = Math.min(maxIndex - 1, Math.floor(floatIndex));
     const segT = floatIndex - segIndex;
     const a = path[segIndex];
@@ -759,35 +762,126 @@ export function updateEchoShift(deltaTime) {
     echoShift.headX = a.x + (b.x - a.x) * segT;
     echoShift.headY = a.y + (b.y - a.y) * segT;
 
+    if (!echoShift.damagedEnemies) echoShift.damagedEnemies = new Set();
+
     const echoDamage = player.attackPower * player.echoPower * (echoShift.powerScale || 1);
     const activeEnemies = enemies.getActiveEnemies();
     const trailRadius = 25;
-    // Resonance: the replay's closing sweep lands with double weight
-    const finishing = perks.has('resonance') && progress >= RESONANCE_FINISH_AT;
+    // Resonance: the barrier bites hardest once the Echo is on its way out
+    const finishing = perks.has('resonance')
+        && (echoShift.elapsed / Math.max(0.001, echoShift.duration)) >= RESONANCE_FINISH_AT;
     const now = performance.now() / 1000;
+    const wallReached = echoShift.elapsed >= ECHO_SWEEP_SECONDS;
 
-    // Only the segment currently being swept can deal damage, so the trail
-    // travels across the arena instead of hitting everything at once
     for (const enemy of activeEnemies) {
-        if (echoShift.damagedEnemies.has(enemy.id)) continue;
-        const dist = distPointToSegment(enemy.x, enemy.y, a.x, a.y, b.x, b.y);
-        if (dist < enemy.size + trailRadius) {
-            const damage = finishing ? echoDamage * 2 : echoDamage;
-            damageEnemy(enemy, damage, { source: 'echo' });
-            spawnHit(enemy.x, enemy.y, '#58e8f4', damage, false);
-            addEchoDamage(damage);
-            echoShift.damagedEnemies.add(enemy.id);
-            // Lingering Mark: the Echo brands everything it touches
-            if (perks.has('lingeringMark')) {
-                enemy.markedEchoUntil = now + LINGERING_MARK_SECONDS;
+        if (enemy.hp <= 0) continue;
+
+        // Impact: the sweeping head hits each enemy once as it goes past
+        if (!echoShift.damagedEnemies.has(enemy.id)) {
+            const dist = distPointToSegment(enemy.x, enemy.y, a.x, a.y, b.x, b.y);
+            if (dist < enemy.size + trailRadius) {
+                const damage = finishing ? echoDamage * 2 : echoDamage;
+                damageEnemy(enemy, damage, { source: 'echo' });
+                spawnHit(enemy.x, enemy.y, '#58e8f4', damage, false);
+                addEchoDamage(damage);
+                echoShift.damagedEnemies.add(enemy.id);
+                // Lingering Mark: the Echo brands everything it touches
+                if (perks.has('lingeringMark')) {
+                    enemy.markedEchoUntil = now + LINGERING_MARK_SECONDS;
+                }
+                audio.play('hit');
             }
-            audio.play('hit');
+        }
+
+        // Burn: anything resting against the finished line keeps taking damage
+        // for as long as the barrier is up
+        if (wallReached) {
+            const wallDist = distanceToPath(enemy.x, enemy.y, path);
+            if (wallDist < enemy.size + ECHO_WALL_HALF_WIDTH) {
+                const burn = echoDamage * ECHO_BURN_PER_SECOND * deltaTime * (finishing ? 2 : 1);
+                damageEnemy(enemy, burn, { source: 'echo' });
+                addEchoDamage(burn);
+                // Lingering Mark keeps refreshing while it cooks
+                if (perks.has('lingeringMark')) {
+                    enemy.markedEchoUntil = now + LINGERING_MARK_SECONDS;
+                }
+            }
         }
     }
 }
 
 const RESONANCE_FINISH_AT = 0.75;
 const LINGERING_MARK_SECONDS = 4;
+// The replay head covers the whole path this fast, so the barrier is up almost
+// immediately no matter how long the run was
+const ECHO_SWEEP_SECONDS = 0.35;
+const ECHO_WALL_HALF_WIDTH = 10;
+// Damage per second, as a share of one full Echo hit, while an enemy is pressed
+// against the standing line
+const ECHO_BURN_PER_SECOND = 0.9;
+
+// Shortest distance from a point to the whole replay path, used for the
+// barrier contact test
+function distanceToPath(px, py, path) {
+    let best = Infinity;
+    for (let i = 0; i < path.length - 1; i++) {
+        const d = distPointToSegment(px, py, path[i].x, path[i].y, path[i + 1].x, path[i + 1].y);
+        if (d < best) best = d;
+    }
+    return best;
+}
+
+// Closest point on a segment, for pushing enemies off the barrier
+function closestPointOnSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return { x: x1, y: y1 };
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    return { x: x1 + t * dx, y: y1 + t * dy };
+}
+
+// The standing Echo line is a wall: enemies stop at it and burn against it.
+// Called from the enemy movement step, after a body has moved.
+export function applyEchoBarrier(enemy) {
+    if (!echoShift.isActive || !echoShift.path || echoShift.path.length < 2) return false;
+    if (echoShift.elapsed < ECHO_SWEEP_SECONDS) return false; // still being drawn
+
+    const path = echoShift.path;
+    const reach = enemy.size + ECHO_WALL_HALF_WIDTH;
+    for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i];
+        const b = path[i + 1];
+        const cp = closestPointOnSegment(enemy.x, enemy.y, a.x, a.y, b.x, b.y);
+        const dx = enemy.x - cp.x;
+        const dy = enemy.y - cp.y;
+        const d = Math.hypot(dx, dy);
+        if (d >= reach) continue;
+        if (d < 0.0001) {
+            // Dead centre on the line: shove straight back along the wall normal
+            const nx = -(b.y - a.y);
+            const ny = b.x - a.x;
+            const nl = Math.hypot(nx, ny) || 1;
+            enemy.x = cp.x + (nx / nl) * reach;
+            enemy.y = cp.y + (ny / nl) * reach;
+            continue;
+        }
+        const nx = dx / d;
+        const ny = dy / d;
+        enemy.x = cp.x + nx * reach;
+        enemy.y = cp.y + ny * reach;
+        // Cancel only the component driving into the wall, so bodies slide
+        // along it instead of sticking
+        const into = enemy.vx * nx + enemy.vy * ny;
+        if (into < 0) {
+            enemy.vx -= nx * into;
+            enemy.vy -= ny * into;
+        }
+        return true;
+    }
+    return false;
+}
 
 function finishEchoShift() {
     // Never Fade: the replay spends its last breath on everything it branded
@@ -837,6 +931,7 @@ function startEchoReplay(powerScale = 1) {
     }
     echoShift.elapsed = 0;
     echoShift.replayProgress = 0;
+    echoShift.sweepComplete = false;
     echoShift.damagedEnemies = new Set();
     echoShift.powerScale = powerScale;
     echoShift.queued = false;
