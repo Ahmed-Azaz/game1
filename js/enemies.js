@@ -15,7 +15,7 @@ const enemyTemplates = {
         speed: 30,
         damage: 3,
         xp: 45,
-        size: 16,
+        size: 8,
         description: 'Orbits at range and commits when you stand still'
     },
     charger: {
@@ -25,7 +25,7 @@ const enemyTemplates = {
         speed: 50,
         damage: 5,
         xp: 75,
-        size: 20,
+        size: 10,
         description: 'Rushes on a locked line, stunned by walls, ends in a shockwave'
     },
     shardling: {
@@ -35,7 +35,7 @@ const enemyTemplates = {
         speed: 200,
         damage: 1,
         xp: 30,
-        size: 12,
+        size: 6,
         description: 'Fragile swarm - bursts into shards when killed'
     },
     null_beast: {
@@ -45,7 +45,7 @@ const enemyTemplates = {
         speed: 20,
         damage: 8,
         xp: 180,
-        size: 32,
+        size: 16,
         description: 'Drags you in with a gravity well and lobs homing orbs'
     },
     echo_hunter: {
@@ -55,7 +55,7 @@ const enemyTemplates = {
         speed: 45,
         damage: 5,
         xp: 105,
-        size: 24,
+        size: 12,
         description: 'Phases through Echo walls and shoots bolts they erase',
         // The one body the wall cannot stop, so its counter-play stays honest
         phasesThroughEcho: true
@@ -67,7 +67,7 @@ const enemyTemplates = {
         speed: 35,
         damage: 12,
         xp: 300,
-        size: 40,
+        size: 20,
         description: 'Elite - caps its minions and fires a charged Rift Lance'
     },
     rift_core: {
@@ -77,7 +77,7 @@ const enemyTemplates = {
         speed: 25,
         damage: 20,
         xp: 900,
-        size: 50,
+        size: 25,
         description: 'Boss - radial bursts, sweeping beam, spiral barrage'
     }
 };
