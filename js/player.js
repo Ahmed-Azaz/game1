@@ -72,6 +72,10 @@ export const player = {
         this.attackCounter = 0;
         this.hitStreak = 0;
         this.flurryCharges = 0;
+        // No facing to remember yet, so a fresh dash falls back to a neutral
+        // direction instead of last run's
+        this.lastMoveX = 0;
+        this.lastMoveY = 0;
     },
     
     update(deltaTime, keysDown, joystickVector) {
@@ -110,6 +114,13 @@ export const player = {
         if (dx !== 0) this.moveDirection.x = Math.sign(dx);
         if (dy !== 0) this.moveDirection.y = Math.sign(dy);
         this.isMoving = dx !== 0 || dy !== 0;
+
+        // Remembered so a dash with no input held still goes the way the player
+        // was last walking, instead of snapping to an arbitrary direction
+        if (dx !== 0 || dy !== 0) {
+            this.lastMoveX = Math.sign(dx);
+            this.lastMoveY = Math.sign(dy);
+        }
 
         // Apply movement
         // Clamp position within arena (50px margin)
@@ -156,6 +167,11 @@ export const player = {
         if (this.killStacks > 0) {
             speed *= 1 + MOMENTUM_PER_STACK * this.killStacks;
         }
+        // Time Dilation's Slow Cap. Applied last so it is a flat tax on the final
+        // speed rather than something the perk bonuses above can scale past,
+        // which is what makes the cap read as a cap.
+        const slow = game.getPlayerSlowFraction ? game.getPlayerSlowFraction() : 0;
+        if (slow > 0) speed *= (1 - slow);
         return speed;
     },
 
@@ -259,6 +275,11 @@ let incoming = amount;
         this.invulnUntil = now + 0.45;
         this.secondsSinceDamage = 0;
         this.regenDelay = perks.has('bleedout') ? 0 : REGEN_HOLD_OFF;
+        // Reflex: a hit during a dilation cuts it short. Read before the rest of
+        // the function so the perk never fires on a hit that was fully ignored.
+        if (incoming > 0 && perks.has('reflex')) {
+            game.onDilationInterrupted();
+        }
         triggerScreenShake(5, 0.14);
         
         // Play pain sound
@@ -411,9 +432,16 @@ let incoming = amount;
     calculateDamage(attackPower) {
         const critical = Math.random() * 100 < this.criticalChance;
         // Weak Spot makes the crits themselves meaner, not just more frequent
-        const critPercent = this.criticalDamage + (critical && perks.has('weakSpot') ? WEAK_SPOT_CRIT_BONUS : 0);
+        let critPercent = this.criticalDamage + (critical && perks.has('weakSpot') ? WEAK_SPOT_CRIT_BONUS : 0);
+        // Deep Freeze: the dilated world is the trade. The player's own attacks
+        // fire on the slowed cadence too, but hit harder for it, so the perk is a
+        // real exchange rather than a flat bonus.
+        let base = attackPower;
+        if (game.getWorldTimeScale && game.getWorldTimeScale() < 1 && perks.has('deepFreeze')) {
+            base *= DEEP_FREEZE_DAMAGE_BONUS;
+        }
         return {
-            damage: critical ? attackPower * (critPercent / 100) : attackPower,
+            damage: critical ? base * (critPercent / 100) : base,
             critical
         };
     }
@@ -426,6 +454,8 @@ const MOMENTUM_PER_STACK = 0.08;
 const MOMENTUM_MAX_STACKS = 10;
 const MOMENTUM_WINDOW = 2;
 const REGEN_HOLD_OFF = 1.2;
+const WEAK_SPOT_CRIT_BONUS = 50;
+const DEEP_FREEZE_DAMAGE_BONUS = 1.3;
 const JUGGERNAUT_CONTACT_CAP = 0.15; // a contact hit takes at most 15% of max HP
 const AEGIS_HP_FLOOR = 0.5; // Aegis only halves projectiles while above this share of max HP
 const JUGGERNAUT_THRESHOLD = 0.5; // only used by the commented-out immunity above
@@ -440,5 +470,4 @@ const PIERCE_WIDTH = 6;
 const STORM_PER_EXTRA_SHOT = 0.15;
 const BOUNCE_FRACTION = 0.5;
 const BOUNCE_SHOT_INDEX = 2;
-const WEAK_SPOT_CRIT_BONUS = 50;
 const BLOODTHIRST_HEAL = 3;

@@ -40,13 +40,33 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
 
         // 12. Multishot - Enemies hit by a single attack volley. Expensive
         // because one point multiplies everything the player does per swing.
-        multishot: { base: 1, points: 0, increment: 1, cost: 3 }
+        multishot: { base: 1, points: 0, increment: 1, cost: 3 },
+
+        // Skill parts for Time Dilation
+        tdPower: { base: 0.35, points: 0, increment: -0.01, min: 0.15, max: 0.5 },
+        tdDuration: { base: 3.0, points: 0, percentPerPoint: 0.10 },
+        tdCooldown: { base: 20.0, points: 0, increment: -1.0, min: 4.0 },
+        tdSlowCap: { base: 0.15, points: 0, increment: 0.04, min: 0, max: 0.4 },
+
+        // Skill parts for Phase Dash
+        pdDistance: { base: 90, points: 0, percentPerPoint: 0.05, round: 'ceil', min: 60, max: 260 },
+        pdIFrames: { base: 0.35, points: 0, increment: 0.03, min: 0.2, max: 0.8 },
+        pdCooldown: { base: 6.0, points: 0, increment: -0.25, min: 2.0 },
+        pdChargedDash: { base: 0, points: 0, increment: 0.2, min: 0, max: 1.0 },
+
+        // Skill parts for Void Nova
+        vnRadius: { base: 60, points: 0, percentPerPoint: 0.08, round: 'ceil', min: 40, max: 140 },
+        vnForce: { base: 1.0, points: 0, percentPerPoint: 0.05 },
+        vnCooldown: { base: 12.0, points: 0, increment: -0.75, min: 3.0 },
+        // 0.2 per point so the inversion at halfway (5 points) and the cap at 1.0
+        // (5 more) are both a real spend rather than two clicks
+        vnGravityWell: { base: 0, points: 0, increment: 0.2, min: 0, max: 1.0 },
     },
 
     // Stats that belong to a skill rather than to the character, and are bought
     // with ability points. They stay in `stats` so perks and the resolved stat
     // block keep working unchanged; only the currency they spend is different.
-    skillStats: ['echoPower', 'echoDuration', 'echoCooldown'],
+    skillStats: ['echoPower', 'echoDuration', 'echoCooldown', 'tdPower', 'tdDuration', 'tdCooldown', 'tdSlowCap', 'pdDistance', 'pdIFrames', 'pdCooldown', 'pdChargedDash', 'vnRadius', 'vnForce', 'vnCooldown', 'vnGravityWell'],
 
     isSkillStat(statKey) {
         return this.skillStats.indexOf(statKey) !== -1;
@@ -181,7 +201,11 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
         if (!def) return false;
         const current = this.resolveStat(def);
         if (def.max !== undefined && current >= def.max) return true;
-        if (def.min !== undefined && current <= def.min) return true;
+        // A zero-based part (Charged Dash, Gravity Well, Slow Cap) starts sitting
+        // on its own floor, so the floor only counts as reached once a point has
+        // actually been spent on it. Otherwise the row would read MAX before the
+        // player had bought anything.
+        if (def.min !== undefined && current <= def.min && def.points > 0) return true;
         return false;
     },
 

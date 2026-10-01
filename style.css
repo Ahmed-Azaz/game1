@@ -1,4 +1,4 @@
-/*
+﻿/*
 
 Echo Rift - Core Styles
 */
@@ -103,21 +103,7 @@ body {
     color: var(--text-secondary);
 }
 
-#echo-shift-indicator {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    color: var(--accent-cyan);
-    pointer-events: auto;
-    font-size: 12px;
-    font-weight: bold;
-    background: rgba(0, 212, 255, 0.2);
-    padding: 6px 12px;
-    border-radius: 4px;
-    border: 1px solid var(--accent-cyan);
-    min-width: 120px;
-    text-align: center;
-}
+
 
 #pause-button {
     position: absolute;
@@ -657,8 +643,6 @@ body {
 #xp-bar-container { width:210px;height:5px;background:rgba(110,146,191,.2);border:1px solid rgba(131,182,226,.28);border-radius:99px;box-shadow:0 0 18px rgba(86,121,255,.12); }
 #xp-bar-fill { background:linear-gradient(90deg,#9a7bff,#52e8ff);box-shadow:0 0 12px rgba(82,232,255,.7); }
 #xp-text { font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8da8c7; }
-#echo-shift-indicator { top:22px;right:22px;display:flex;align-items:center;gap:12px;padding:9px 13px;background:linear-gradient(120deg,rgba(17,36,62,.88),rgba(32,24,62,.82));border:1px solid rgba(92,229,255,.55);border-radius:3px;color:#8ff4ff;box-shadow:0 0 24px rgba(32,202,255,.15),inset 0 0 18px rgba(53,163,255,.08);font-size:10px;letter-spacing:.12em;backdrop-filter:blur(8px); }
-#echo-shift-cooldown { color:#efffff;font-variant-numeric:tabular-nums; }
 #pause-button { top:22px;right:178px;width:34px;height:34px;line-height:32px;border-radius:3px;border-color:rgba(143,183,222,.4);background:rgba(12,19,39,.76);color:#c8dcf4;box-shadow:0 0 18px rgba(83,142,206,.12);transition:.18s ease; }
 #pause-button:hover { border-color:#69efff;color:#fff;box-shadow:0 0 18px rgba(83,224,255,.35); }
 #pause-menu,#game-over { background:rgba(3,6,16,.72);backdrop-filter:blur(10px); }
@@ -672,7 +656,7 @@ body {
 #onboarding-prompt1,#onboarding-prompt2,#onboarding-prompt3,#onboarding-prompt4 { background:linear-gradient(100deg,rgba(19,31,57,.8),rgba(18,23,45,.72));border:1px solid rgba(125,167,215,.18);border-radius:2px;color:#c8d9ee;letter-spacing:.035em; }
 .stat-row { background:rgba(135,180,232,.055);border:1px solid rgba(125,167,215,.1);border-radius:2px; }
 .stat-plus { border-radius:2px; }
-@media(max-width:600px) { #hud{top:12px;left:12px} #xp-bar-container{width:min(42vw,180px)} #echo-shift-indicator{top:12px;right:12px;padding:7px 9px;font-size:9px;gap:6px} #pause-button{top:12px;right:145px;width:30px;height:30px;line-height:28px} #pause-menu .menu-overlay,#game-over .menu-overlay{padding:22px 20px} }
+@media(max-width:600px) { #hud{top:12px;left:12px} #xp-bar-container{width:min(42vw,180px)} #skill-indicator{top:12px;right:12px;padding:7px 9px;font-size:9px;gap:6px} #pause-button{top:12px;right:145px;width:30px;height:30px;line-height:28px} #pause-menu .menu-overlay,#game-over .menu-overlay{padding:22px 20px} }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after{scroll-behavior:auto!important;transition:none!important} }
 
 #touch-controls {
@@ -714,7 +698,10 @@ body {
     border-radius: 50%;
     transform: translate(0px, 0px);
 }
-#touch-echo-btn {
+/* Fires whichever skill is equipped, so it is deliberately a neutral violet
+   rather than the Echo's own colour: the label is repainted by ui.js with the
+   equipped skill's name, but the button keeps one identity. */
+#touch-skill-btn {
     position: absolute;
     bottom: 40px;
     left: 40px;
@@ -728,10 +715,12 @@ body {
     text-align: center;
     line-height: 80px;
     font-weight: bold;
+    font-size: 11px;
+    letter-spacing: 0.06em;
     pointer-events: auto;
     user-select: none;
 }
-#touch-echo-btn:active {
+#touch-skill-btn:active {
     background: rgba(182, 154, 255, 0.5);
 }
 
@@ -746,7 +735,7 @@ body {
 }
 
 #game-canvas { width: 100%; height: 100%; }
-#touch-controls, #joystick-area, #touch-echo-btn { touch-action: none; }
+#touch-controls, #joystick-area, #touch-skill-btn, #skill-rail { touch-action: none; }
 #settings-panel {
     position: absolute;
     inset: 0;
@@ -782,14 +771,14 @@ body {
     height: clamp(78px, 13.5vw, 100px);
     pointer-events: auto;
 }
-#touch-echo-btn {
+#touch-skill-btn {
     width: clamp(52px, 9.5vw, 62px);
     height: clamp(52px, 9.5vw, 62px);
     line-height: clamp(50px, 9vw, 60px);
     bottom: max(16px, env(safe-area-inset-bottom));
     left: max(16px, env(safe-area-inset-left));
     right: auto;
-    font-size: 11px;
+    font-size: 10px;
 }
 
 /* The knob scales with the base so it keeps the same proportion at every size.
@@ -808,9 +797,165 @@ body {
     right: auto;
     left: max(14px, env(safe-area-inset-left));
 }
-#touch-controls.swapped #touch-echo-btn {
+#touch-controls.swapped #touch-skill-btn {
     left: auto;
     right: max(16px, env(safe-area-inset-right));
+}
+
+/* --- Skill selection rail -------------------------------------------------
+   A vertical strip on the right edge. It is inside the HUD overlay, so it lives
+   in overlay pixels rather than arena pixels and stays put while the canvas
+   scales. Chips are large enough to tap on a phone and shrink to a key hint on
+   desktop. */
+#skill-rail {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: auto;
+    z-index: 6;
+}
+
+/* The equipped chip is the only one that keeps full opacity; the rest stay
+   readable but recede, so the eye goes to the skill you are actually holding. */
+.skill-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    min-width: 62px;
+    padding: 7px 6px;
+    background: rgba(8, 16, 28, 0.72);
+    border: 1px solid rgba(125, 167, 215, 0.28);
+    border-left: 3px solid var(--skill-color);
+    border-radius: 5px;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    opacity: 0.62;
+    transition: opacity .12s ease, border-color .12s ease, background .12s ease;
+}
+
+.skill-chip.equipped {
+    opacity: 1;
+    color: var(--skill-accent);
+    background: rgba(10, 22, 38, 0.92);
+    border-color: var(--skill-color);
+    /* A soft glow in the skill's own colour, so switching is felt as well as read */
+    box-shadow: 0 0 10px -2px var(--skill-color);
+}
+
+/* Cooling down but not equipped: dim, but still shows the remaining seconds so
+   switching to it is an informed choice rather than a guess. */
+.skill-chip.cooling {
+    opacity: 0.45;
+}
+
+.skill-chip-key {
+    font-size: 8px;
+    opacity: 0.65;
+}
+
+.skill-chip-name {
+    font-weight: 700;
+    color: inherit;
+}
+
+.skill-chip-cd {
+    font-size: 9px;
+    color: var(--skill-color);
+    min-height: 11px;
+}
+
+/* --- Single cooldown indicator --------------------------------------------
+   There is one of these, not one per skill. It is repainted in the equipped
+   skill's colour and shows that skill's own remaining time, so it disappears
+   the moment you switch away and comes back showing the real remainder. */
+#skill-indicator {
+    position: absolute;
+    left: 50%;
+    bottom: 96px;
+    transform: translateX(-50%);
+    min-width: 190px;
+    padding: 7px 12px;
+    background: rgba(8, 16, 28, 0.82);
+    border: 1px solid var(--skill-color);
+    border-radius: 5px;
+    text-align: center;
+    pointer-events: none;
+    z-index: 5;
+}
+
+#skill-indicator-label {
+    display: block;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    color: var(--skill-accent);
+}
+
+#skill-indicator-time {
+    display: block;
+    font-size: 16px;
+    font-weight: 700;
+    color: #e7f3ff;
+    margin: 1px 0 5px;
+}
+
+#skill-indicator-track {
+    height: 4px;
+    background: rgba(125, 167, 215, 0.2);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+#skill-indicator-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--skill-color);
+    border-radius: 2px;
+}
+
+/* The Skills tab card for the equipped skill, tinted with its own colour */
+.skill-card.equipped {
+    border-color: var(--skill-color);
+    box-shadow: 0 0 14px -6px var(--skill-color);
+}
+
+.skill-card.equipped .skill-name {
+    color: var(--skill-accent);
+}
+
+.skill-equipped-tag {
+    color: var(--skill-color);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+/* --- Narrow screens -------------------------------------------------------
+   The rail would collide with the arena on a phone, so it tightens rather than
+   disappearing: switching skills has to stay reachable during a fight. */
+@media (max-width: 700px) {
+    #skill-rail {
+        right: 6px;
+        gap: 5px;
+    }
+
+    .skill-chip {
+        min-width: 50px;
+        padding: 6px 4px;
+        font-size: 8px;
+    }
+
+    #skill-indicator {
+        bottom: 88px;
+        min-width: 160px;
+    }
 }
 
 /* Title card */

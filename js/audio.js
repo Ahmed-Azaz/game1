@@ -73,6 +73,30 @@ export function play(name) {
                 duration = 0.2;
                 type = 'sine';
                 break;
+            case 'time_dilation':
+                // Descending sweep: the sound of the world dropping into syrup
+                frequency = 660;
+                duration = 0.5;
+                type = 'triangle';
+                oscillator.frequency.setValueAtTime(660, audioContext.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(140, audioContext.currentTime + duration);
+                gainNode.gain.setValueAtTime(sfxVolume * masterVolume, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+                return; // Handled separately
+            case 'phase_dash':
+                // Short upward blip: quick enough to read as a dodge
+                frequency = 420;
+                duration = 0.12;
+                type = 'sawtooth';
+                break;
+            case 'void_nova':
+                // Low thump with a short tail, so it reads as heavy and close
+                frequency = 160;
+                duration = 0.35;
+                type = 'sine';
+                break;
             case 'echo_shift':
                 frequency = 294;
                 duration = 0.3;

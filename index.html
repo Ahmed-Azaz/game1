@@ -26,9 +26,20 @@
                     <span id="best-display" class="record">Best 0:00</span>
                 </div>
             </div>
-            <div id="echo-shift-indicator" style="display: none;">
-                <span id="echo-shift-text">ECHO SHIFT: READY</span>
-                <span id="echo-shift-cooldown">0.0s</span>
+            <!-- Skill selection rail. Click or tap a chip to equip that skill;
+                 the hotkey on each one does the same thing from the keyboard. -->
+            <div id="skill-rail"></div>
+
+            <!-- One indicator for whichever skill is equipped. It is repainted
+                 in that skill's colour and shows that skill's own remaining
+                 cooldown, so switching back mid-recharge shows the time that is
+                 actually left on it rather than hiding it. -->
+            <div id="skill-indicator" style="display: none;">
+                <span id="skill-indicator-label">READY</span>
+                <span id="skill-indicator-time">0.0s</span>
+                <div id="skill-indicator-track">
+                    <div id="skill-indicator-fill"></div>
+                </div>
             </div>
             <div id="pause-button">≡</div>
         </div>
@@ -87,8 +98,8 @@
                     <p>Levels grant Stat Points. Spend them on power, speed, echo strength, and more — the arena pauses while you choose.</p>
                 </div>
                 <div class="onboarding-screen">
-                    <h3>Echo Shift</h3>
-                    <p>Press SPACE (or the SHIFT button on mobile). Your recent movement sweeps the arena as a damaging echo trail.</p>
+                    <h3>Skills</h3>
+                    <p>Press SPACE (or the SKILL button on mobile) to fire the equipped skill. Tap a skill on the right rail, or press 1-3, to switch between them.</p>
                 </div>
                 <div class="onboarding-nav">
                     <button id="onboarding-next">Next</button>
@@ -133,7 +144,8 @@
                 <div id="joystick-base"></div>
                 <div id="joystick-stick"></div>
             </div>
-            <div id="touch-echo-btn">SHIFT</div>
+            <!-- Fires whichever skill is equipped; the label tracks the rail -->
+            <div id="touch-skill-btn">SKILL</div>
         </div>
     </div>
     <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>

@@ -17,13 +17,16 @@
 import { upgradeSystem } from './upgrades.js';
 
 // Echo Cooldown improves as it goes down, so its "bonus" is the reduction.
-const INVERSE_STATS = new Set(['echoCooldown']);
+// Time Dilation Power works the same way: points make the world slower, and the
+// milestone is measured against how much slower, not how much faster.
+const INVERSE_STATS = new Set(['echoCooldown', 'tdPower']);
 
 // Display order of the perk groups, matching the stat screen.
 export const PERK_STATS = [
     'hp', 'hpRegen', 'moveSpeed', 'attackPower', 'attackSpeed', 'attackRange',
     'criticalChance', 'criticalDamage', 'echoPower', 'echoDuration',
-    'echoCooldown', 'multishot'
+    'echoCooldown', 'tdPower', 'pdDistance', 'pdIFrames', 'pdChargedDash',
+    'vnGravityWell', 'vnForce', 'vnRadius', 'multishot'
 ];
 
 export const PERKS = [
@@ -108,6 +111,36 @@ export const PERKS = [
     { id: 'echoStorm', stat: 'echoCooldown', tier: 2, threshold: 85, name: 'Echo Storm',
       description: 'While an Echo replay is running, your attack rate is doubled.' },
 
+    // Time Dilation
+    // Power is an inverse stat: spending points lowers the world's speed, so its
+    // "bonus" is the reduction, same treatment as echoCooldown.
+    // Thresholds are the percentage of world speed removed (base 0.35). Tier 1
+    // lands near 5 points and tier 2 near 10, both short of the 0.15 floor,
+    // which keeps the second tier a real commitment rather than an inevitability.
+    { id: 'deepFreeze', stat: 'tdPower', tier: 1, threshold: 14, name: 'Deep Freeze',
+      description: 'While the world is dilated your own attacks also slow, but deal +30% damage.' },
+    { id: 'reflex', stat: 'tdPower', tier: 2, threshold: 29, name: 'Reflex',
+      description: 'Taking a hit while dilated ends the slow early and refunds half its cooldown.' },
+
+    // Phase Dash
+    { id: 'phaseEcho', stat: 'pdDistance', tier: 1, threshold: 40, name: 'Phase Echo',
+      description: 'Dashing leaves a burning afterimage along the line you crossed.' },
+    { id: 'slipstreamDash', stat: 'pdDistance', tier: 2, threshold: 90, name: 'Slipstream',
+      description: 'Each enemy you dash through refunds 50% of the dash cooldown.' },
+
+    { id: 'untouchable', stat: 'pdIFrames', tier: 1, threshold: 60, name: 'Untouchable',
+      description: 'Your dash ends with a small nova that pushes enemies away.' },
+    { id: 'phaseCharged', stat: 'pdChargedDash', tier: 1, threshold: 50, name: 'Heavy Phase',
+      description: 'A charged dash deals damage to everything it passes through.' },
+
+    // Void Nova
+    { id: 'singularity', stat: 'vnGravityWell', tier: 1, threshold: 100, name: 'Singularity',
+      description: 'Enemies dragged in by the Gravity Well take +40% damage.' },
+    { id: 'shockwave', stat: 'vnForce', tier: 1, threshold: 60, name: 'Shockwave',
+      description: 'The nova interrupts enemy windups, cancelling charged attacks.' },
+    { id: 'eventHorizon', stat: 'vnRadius', tier: 1, threshold: 60, name: 'Event Horizon',
+      description: 'The nova radius grows 20% while you are standing still.' },
+
     // Multishot
     { id: 'bounce', stat: 'multishot', tier: 1, threshold: 500, name: 'Bounce',
       description: 'The 3rd shot of a volley ricochets to one more enemy for 50% damage.' },
@@ -133,10 +166,20 @@ export const perks = {
         if (!def) return 0;
         const stats = upgradeSystem.getStats();
         const current = stats[statKey];
-        if (INVERSE_STATS.has(statKey)) {
-            return def.base === 0 ? 0 : ((def.base - current) / def.base) * 100;
+        // Parts that start at zero (Charged Dash, Gravity Well, Slow Cap) cannot
+        // be measured against a base of zero, so they are measured against the
+        // rest of their own ladder instead. A perk on one of these is then read
+        // as "how far up this part have you pushed it", which is what the player
+        // is actually buying.
+        if (def.base === 0) {
+            const span = (def.max || 0) - (def.min || 0);
+            if (span <= 0) return 0;
+            return ((current - (def.min || 0)) / span) * 100;
         }
-        return def.base === 0 ? 0 : ((current - def.base) / def.base) * 100;
+        if (INVERSE_STATS.has(statKey)) {
+            return ((def.base - current) / def.base) * 100;
+        }
+        return ((current - def.base) / def.base) * 100;
     },
 
     isUnlocked(perkId) {

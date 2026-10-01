@@ -7,9 +7,10 @@ import { perks } from './perks.js';
 import * as audio from './audio.js';
 import { crazyGames } from './crazygames.js';
 import { saveSystem } from './save.js';
-import { clear as clearVisualEffects, spawnHit, setParticleQuality, setScreenShakeEnabled } from './visual-effects.js';
+import { clear as clearVisualEffects, spawnHit, setParticleQuality, setScreenShakeEnabled, spawnBurst, triggerScreenShake } from './visual-effects.js';
 import * as quality from './render-quality.js';
 import * as fragments from './fragments.js';
+import { SKILLS, SKILL_ORDER, skillRegistry } from './skills.js';
 
 // Shared mutable state (read by ui.js/enemies.js/player.js via namespace import)
 export let gameState = null;
@@ -69,6 +70,10 @@ export function initGame() {
     enemies.setWave(1);
     
     // Echo Shift
+    // All four skills start ready on a fresh run. Perks, not unlocks, are the
+    // progression here, so there is nothing to gate behind a level.
+    skillRegistry.clearAll();
+
     echoShift = {
         isActive: false,
         path: [], // Frozen path replayed as a damage trail
@@ -167,6 +172,12 @@ export function update(deltaTime) {
     
     secondsSinceStart += deltaTime;
     gameState.secondsSinceStart = secondsSinceStart;
+
+    // Time Dilation bends the world clock, not the run clock. Cooldowns, waves
+    // and the Echo replay all read secondsSinceStart and must keep running at
+    // real speed, otherwise slowing the world would also hand back free
+    // cooldown and let a wave drag on forever.
+    const worldDelta = deltaTime * getWorldTimeScale();
     
     // Wave system - ends on a kill quota, floored and capped so it can neither
     // chain nor drag
@@ -204,14 +215,20 @@ export function update(deltaTime) {
         }
     }
     
-    // Update existing enemies
-    enemies.updateAll(deltaTime);
-    projectiles.updateAll(deltaTime);
-    fragments.updateAll(deltaTime);
+    // Everything that lives in the world runs on the dilated clock. The player
+    // is updated by main.js on the raw delta, so moving and dodging stay
+    // responsive while the threats being dodged are in slow motion.
+    enemies.updateAll(worldDelta);
+    projectiles.updateAll(worldDelta);
+    fragments.updateAll(worldDelta);
     
     // Player auto-attack nearest enemy in range
     player.autoAttack(enemies.getActiveEnemies());
     
+    // Skill state. Runs on the raw delta, not the dilated one: cooldowns and
+    // the dilation window itself are the player's, not the world's.
+    updateSkills(deltaTime);
+
     // Update echo shift
     updateEchoShift(deltaTime);
     
@@ -224,6 +241,470 @@ export function update(deltaTime) {
     
     // Check game over
     checkGameOverState();
+}
+
+// ============================================================================
+// Additional skills
+//
+// Each skill owns its own state, resolved from its upgradeable parts. The three
+// new ones live here rather than in their own modules because they all need the
+// same three things game.js already holds: the player, the enemy list and the
+// visual effects. skills.js stays a pure registry so it never has to import
+// back into this file.
+// ============================================================================
+
+// --- Time Dilation ---------------------------------------------------------
+const timeDilation = {
+    active: false,
+    // Counts down on the WORLD clock, so a deep dilation does not also extend
+    // the skill's own life
+    remaining: 0,
+    duration: 0,
+    timeScale: 1,
+    slowCap: 0
+};
+
+// The floor the dilation part can push the world down to
+const TD_MIN_SCALE = 0.15;
+// Fades rather than snapping: a full-frame speed change reads as a glitch, and
+// an instant slow also teleports fast projectiles past the player's hitbox
+const TD_FADE_IN = 0.1;
+const TD_FADE_OUT = 0.18;
+
+// --- Phase Dash ------------------------------------------------------------
+const dash = {
+    active: false,
+    remaining: 0,
+    total: 0,
+    dx: 0,
+    dy: 0,
+    charged: false,
+    // Charge accumulates while the trigger is held and fires on release
+    charging: false,
+    charge: 0,
+    chargeTime: 0
+};
+
+const DASH_CHARGE_SECONDS = 0.5;
+// What the Charged Dash part buys: a longer, piercing dash
+const DASH_CHARGED_MULTIPLIER = 2.0;
+
+// --- Void Nova -------------------------------------------------------------
+const nova = {
+    // Expansion ring, for rendering only. The damage is resolved once on
+    // activation, so this is never a second hit.
+    ring: null
+};
+
+// --- shared helpers --------------------------------------------------------
+
+// The arena margin the player is clamped to inside player.js. A dash that runs
+// a body past the wall would leave it outside the arena, so it is clamped to the
+// same box rather than using a looser one.
+const PLAYER_ARENA_MARGIN = 65;
+
+// Axis is explicit rather than inferred from the value: the arena is wider than
+// it is tall, and a value that happens to match player.x would silently get
+// clamped to the wrong edge.
+function clampToArena(pos, halfSize, axis) {
+    const lo = PLAYER_ARENA_MARGIN + halfSize;
+    const hi = (axis === 'y' ? canvasHeight : canvasWidth) - PLAYER_ARENA_MARGIN - halfSize;
+    return Math.max(lo, Math.min(hi, pos));
+}
+
+export function getWorldTimeScale() {
+    return timeDilation.active ? timeDilation.timeScale : 1;
+}
+
+// True while the player's own speed is being eaten by the slow cap
+export function isPlayerSlowed() {
+    return timeDilation.active && timeDilation.slowCap > 0;
+}
+
+// The dilation state itself, for the renderer and for tests that need to tell
+// "still ramping" apart from "already fading back out"
+export function getTimeDilation() {
+    return timeDilation;
+}
+
+export function getPlayerSlowFraction() {
+    return isPlayerSlowed() ? timeDilation.slowCap : 0;
+}
+
+// --- Time Dilation ---------------------------------------------------------
+// Solves the world's speed for this activation. Higher power slows the world
+// further, but the same purchase raises the cap on how much of the player's own
+// speed is lost, so a deep dilation is paid for with mobility rather than being
+// a free "do everything again" button.
+export function activateTimeDilation() {
+    if (!skillRegistry.isReady('time_dilation')) return false;
+
+    const stats = upgradeSystem.getStats();
+    const targetScale = Math.max(TD_MIN_SCALE, stats.tdPower);
+    const duration = stats.tdDuration;
+    const cap = Math.max(0, Math.min(0.6, stats.tdSlowCap));
+
+    timeDilation.active = true;
+    timeDilation.duration = duration;
+    timeDilation.remaining = duration;
+    timeDilation.slowCap = cap;
+    // Start from the previous frame's scale so a re-trigger mid-fade eases out
+    // of where it was instead of jumping
+    timeDilation.timeScale = timeDilation.timeScale;
+    timeDilation._targetScale = targetScale;
+    timeDilation._fade = 0;
+
+    skillRegistry.startCooldown('time_dilation', stats.tdCooldown);
+    audio.play('time_dilation');
+    spawnBurst(player.x, player.y, SKILLS.time_dilation.color, 14);
+    return true;
+}
+
+function updateTimeDilation(deltaTime) {
+    if (!timeDilation.active) return;
+
+    timeDilation.remaining -= deltaTime;
+
+    // Reflex: taking a hit while dilated cuts the slow short and refunds part of
+    // the cooldown. It ends the active effect rather than the fade, so the world
+    // still eases back up instead of snapping.
+    if (timeDilation.remaining <= 0) {
+        timeDilation._fadeOut = true;
+        timeDilation.remaining = 0;
+    }
+
+    const target = timeDilation._fadeOut ? 1 : timeDilation._targetScale;
+    const rate = timeDilation._fadeOut ? 1 / TD_FADE_OUT : 1 / TD_FADE_IN;
+    if (timeDilation.timeScale < target) {
+        timeDilation.timeScale = Math.min(target, timeDilation.timeScale + rate * deltaTime);
+    } else if (timeDilation.timeScale > target) {
+        timeDilation.timeScale = Math.max(target, timeDilation.timeScale - rate * deltaTime);
+    }
+
+    if (timeDilation._fadeOut && timeDilation.timeScale >= 1) {
+        timeDilation.active = false;
+        timeDilation.timeScale = 1;
+        timeDilation.slowCap = 0;
+        timeDilation._fadeOut = false;
+    }
+}
+
+// Reflex, called from the damage path when the hit lands during a dilation
+export function onDilationInterrupted() {
+    if (!timeDilation.active) return;
+    timeDilation._fadeOut = true;
+    timeDilation.remaining = 0;
+    const stats = upgradeSystem.getStats();
+    skillRegistry.refundCooldown('time_dilation', stats.tdCooldown * 0.5);
+}
+
+// --- Phase Dash ------------------------------------------------------------
+export function activatePhaseDash(charged = false) {
+    if (!skillRegistry.isReady('phase_dash')) return false;
+
+    const stats = upgradeSystem.getStats();
+    const charge = charged ? 1 : 0;
+    const distance = stats.pdDistance;
+
+    // Dash the way the player is holding, or the way they were last moving, so
+    // a tap with no input still goes somewhere sensible.
+    let dx = 0;
+    let dy = 0;
+    if (player.isMoving) {
+        dx = player.moveDirection.x;
+        dy = player.moveDirection.y;
+    } else if (player.lastMoveX || player.lastMoveY) {
+        dx = player.lastMoveX;
+        dy = player.lastMoveY;
+    } else {
+        dx = 1;
+        dy = 0;
+    }
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len;
+    dy /= len;
+
+    dash.active = true;
+    dash.charged = charged;
+    dash.total = charged ? 0.18 : 0.1;
+    dash.remaining = dash.total;
+    dash.dx = dx;
+    dash.dy = dy;
+    dash._travelled = 0;
+    dash._distance = distance;
+    dash._fromX = player.x;
+    dash._fromY = player.y;
+    dash._hit = new Set();
+
+    // i-frames cover the whole dash, not just the first frame, so a dash into a
+    // body still ends safe
+    player.invulnUntil = Math.max(player.invulnUntil, performance.now() / 1000 + stats.pdIFrames);
+
+// Charged Dash travels further for every point invested. The scaling is
+// measured off the part's base ladder rather than a floating factor.
+const chargedExtra = charged ? 1 + (stats.pdChargedDash) * (DASH_CHARGED_MULTIPLIER - 1) : 1;
+dash._distance = distance * (charged ? chargedExtra : 1);
+
+    skillRegistry.startCooldown('phase_dash', stats.pdCooldown);
+    audio.play('phase_dash');
+    return true;
+}
+
+// Charge is tracked on press and released on let-go. The cooldown only starts
+// when the dash actually fires, so a tap that is never released cannot leave the
+// player locked out of the skill.
+export function beginDashCharge() {
+    if (!skillRegistry.isReady('phase_dash')) return false;
+    dash.charging = true;
+    dash.charge = 0;
+    dash.chargeTime = 0;
+    return true;
+}
+
+export function releaseDashCharge() {
+    if (!dash.charging) return false;
+    dash.charging = false;
+    const charged = dash.charge >= 1;
+    dash.charge = 0;
+    return activatePhaseDash(charged);
+}
+
+export function isDashCharging() {
+    return dash.charging;
+}
+
+// Cancelling the charge mid-hold leaves it ready: no cooldown, no dash fired
+export function cancelDashCharge() {
+    dash.charging = false;
+    dash.charge = 0;
+    dash.chargeTime = 0;
+}
+
+function updatePhaseDash(deltaTime) {
+    if (dash.charging) {
+        dash.chargeTime += deltaTime;
+        dash.charge = Math.min(1, dash.chargeTime / DASH_CHARGE_SECONDS);
+    }
+    if (!dash.active) return;
+
+    dash.remaining -= deltaTime;
+
+    // Move along the dash line at a constant speed, then clamp to the arena so
+    // the player can never be left outside the playfield.
+    // Spend only what is left of the dash distance this frame, so the last
+    // partial step cannot overshoot the promised range.
+    const step = Math.min((dash._distance / dash.total) * deltaTime, dash._distance - dash._travelled);
+    dash._travelled += step;
+    player.x = clampToArena(player.x + dash.dx * step, player.radius, 'x');
+    player.y = clampToArena(player.y + dash.dy * step, player.radius, 'y');
+
+    resolveDashPassThrough();
+
+    if (dash.remaining <= 0) {
+        dash.active = false;
+        spawnBurst(player.x, player.y, SKILLS.phase_dash.color, dash.charged ? 10 : 5);
+        // Untouchable: the dash ends with a shove, so landing inside a pack
+        // pushes it off instead of just relocating the player into it
+        if (perks.has('untouchable')) {
+            endDashPush();
+        }
+    }
+}
+
+// What the dash does to anything it passes through. Each enemy can only be hit
+// once per dash, tracked by id so a long dash does not re-hit the same body on
+// consecutive frames.
+function resolveDashPassThrough() {
+    const damaging = dash.charged && perks.has('phaseCharged');
+    const refunding = perks.has('slipstreamDash');
+    const activeEnemies = enemies.getActiveEnemies();
+
+    for (const enemy of activeEnemies) {
+        if (enemy.hp <= 0 || dash._hit.has(enemy.id)) continue;
+        const dist = Math.hypot(enemy.x - player.x, enemy.y - player.y);
+        if (dist > enemy.size + player.radius) continue;
+
+        dash._hit.add(enemy.id);
+
+        if (damaging) {
+            const damage = player.attackPower;
+            damageEnemy(enemy, damage, { source: 'dash' });
+            spawnHit(enemy.x, enemy.y, SKILLS.phase_dash.color, damage, false);
+            audio.play('hit');
+        }
+        if (refunding) {
+            // Half the cooldown back per body, so diving through a swarm is how
+            // this perk is actually paid out. Uses the registry's refund so it
+            // shortens the remaining time rather than re-arming the cooldown.
+            const stats = upgradeSystem.getStats();
+            skillRegistry.refundCooldown('phase_dash', stats.pdCooldown * 0.5);
+        }
+    }
+}
+
+// Untouchable: a shove on landing. Pushes the pack off the player so the dash
+// ends somewhere survivable rather than relocating them inside the swarm.
+function endDashPush() {
+    const stats = upgradeSystem.getStats();
+    const radius = stats.vnRadius * 0.6;
+    for (const enemy of enemies.getActiveEnemies()) {
+        if (enemy.hp <= 0) continue;
+        const dx = enemy.x - player.x;
+        const dy = enemy.y - player.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > radius + enemy.size || dist < 0.01) continue;
+        const shove = 200;
+        enemy.x += (dx / dist) * shove * 0.02;
+        enemy.y += (dy / dist) * shove * 0.02;
+        enemy.stunUntil = Math.max(enemy.stunUntil, performance.now() / 1000 + 0.2);
+    }
+}
+
+// --- Void Nova -------------------------------------------------------------
+// Shared by the nova and its inverted Gravity Well form: same reach, same hit,
+// opposite direction of travel.
+export function activateVoidNova() {
+    if (!skillRegistry.isReady('void_nova')) return false;
+
+    const stats = upgradeSystem.getStats();
+    // Event Horizon: the nova reaches further while the player holds still, so
+    // standing your ground in a swarm is the build's payoff
+    const still = !player.isMoving;
+    const radius = stats.vnRadius * (perks.has('eventHorizon') && still ? 1.2 : 1);
+    const force = stats.vnForce;
+    // Gravity Well is a 0..1 part: above halfway it inverts the push into a pull
+    const well = stats.vnGravityWell;
+    const pulling = well >= 0.5;
+    const shockwave = perks.has('shockwave');
+
+    const activeEnemies = enemies.getActiveEnemies();
+    const damage = player.attackPower * force;
+
+    for (const enemy of activeEnemies) {
+        if (enemy.hp <= 0) continue;
+        const dx = enemy.x - player.x;
+        const dy = enemy.y - player.y;
+        const dist = Math.hypot(dx, dy);
+        // The body itself is the edge, so a big enemy is not "in" the nova while
+        // its centre is still outside it
+        if (dist > radius + enemy.size) continue;
+
+        let nx = 0;
+        let ny = 0;
+        if (dist > 0.01) {
+            nx = dx / dist;
+            ny = dy / dist;
+            // Falls off toward the rim so the nova has a soft edge rather than a
+            // hard wall of displacement
+            const falloff = 1 - Math.min(1, dist / Math.max(1, radius));
+            const shove = force * 260 * (0.35 + 0.65 * falloff);
+            const dir = pulling ? -1 : 1;
+            enemy.x += nx * shove * dir * 0.02;
+            enemy.y += ny * shove * dir * 0.02;
+            // A shove also interrupts: the pack arrives staggered instead of
+            // landing on the player all at once. Shockwave extends that to the
+            // long windups (the Rift Warden's lance), which is the whole point.
+            enemy.stunUntil = Math.max(
+                enemy.stunUntil,
+                performance.now() / 1000 + (shockwave ? 0.6 : 0.25)
+            );
+        }
+
+        if (damage > 0) {
+            // Singularity: anything the well dragged inward is softer
+            const bonus = pulling && perks.has('singularity') ? 1.4 : 1;
+            damageEnemy(enemy, damage * bonus, { source: 'nova' });
+            spawnHit(enemy.x, enemy.y, SKILLS.void_nova.color, damage * bonus, false);
+            audio.play('hit');
+        }
+    }
+
+    nova.ring = {
+        x: player.x,
+        y: player.y,
+        radius: 0,
+        target: radius,
+        life: 0.4,
+        elapsed: 0,
+        pulling
+    };
+
+    skillRegistry.startCooldown('void_nova', stats.vnCooldown);
+    audio.play('void_nova');
+    triggerScreenShake(7, 0.2);
+    return true;
+}
+
+function updateVoidNova(deltaTime) {
+    if (!nova.ring) return;
+    nova.ring.elapsed += deltaTime;
+    if (nova.ring.elapsed >= nova.ring.life) {
+        nova.ring = null;
+        return;
+    }
+    // Ease outward so the blast reads as a shockwave rather than a growing circle
+    const t = nova.ring.elapsed / nova.ring.life;
+    nova.ring.radius = nova.ring.target * (1 - Math.pow(1 - t, 3));
+}
+
+// --- shared ----------------------------------------------------------------
+
+// Cooldowns tick on the run clock so they freeze while the stat screen or the
+// pause menu is up, exactly like the Echo replay.
+export function updateSkills(deltaTime) {
+    skillRegistry.update(deltaTime);
+    updateTimeDilation(deltaTime);
+    updatePhaseDash(deltaTime);
+    updateVoidNova(deltaTime);
+}
+
+// One entry point for the activation key: it routes to whatever is equipped, so
+// the player only ever has one button to remember.
+export function activateEquippedSkill() {
+    switch (skillRegistry.getEquippedId()) {
+        case 'time_dilation':
+            return activateTimeDilation();
+        case 'phase_dash':
+            return activatePhaseDash(false);
+        case 'void_nova':
+            return activateVoidNova();
+        case 'echo_shift':
+        default:
+            return activateEchoShift();
+    }
+}
+
+export function getNovaRing() {
+    return nova.ring;
+}
+
+export function isDashActive() {
+    return dash.active;
+}
+
+export function getDashCharge() {
+    return dash.charge;
+}
+
+// Cleared on every run restart so a dash mid-flight or a dilation mid-window
+// cannot leak into the next run
+export function resetSkills() {
+    timeDilation.active = false;
+    timeDilation.remaining = 0;
+    timeDilation.duration = 0;
+    timeDilation.timeScale = 1;
+    timeDilation.slowCap = 0;
+    timeDilation._targetScale = 1;
+    timeDilation._fadeOut = false;
+
+    dash.active = false;
+    dash.remaining = 0;
+    dash.charging = false;
+    dash.charge = 0;
+    dash.chargeTime = 0;
+
+    nova.ring = null;
+    skillRegistry.clearAll();
 }
 
 // A wave is cleared when the player has killed as many enemies as the wave has
@@ -700,6 +1181,8 @@ export function restartRun() {
     quality.resetAdaptive();
     fragments.resetAll();
     projectiles.reset();
+    // Cooldowns, a live dilation and a dash in flight are all per-run
+    resetSkills();
     bossWaveActive = false;
     runEnded = false;
     gameState.statAllocationOpen = false;
@@ -1011,6 +1494,9 @@ export function activateEchoShift() {
         echoShift.queuedPowerScale = TWIN_ECHO_FRACTION;
     }
     echoShift.lastUsed = now;
+    // The registry owns the visible cooldown for the shared indicator; the
+    // echoShift.lastUsed clock above stays for the replay logic.
+    skillRegistry.startCooldown('echo_shift', echoShift.cooldown);
     audio.play('echo_shift');
     return true;
 }

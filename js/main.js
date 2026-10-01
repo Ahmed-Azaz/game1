@@ -1,5 +1,10 @@
 // Main entry point - game bootstrap and state management
-import { initGame, update as gameUpdate, echoShift, getRunTime, gameplayStart, gameplayStop, isMarked } from './game.js';
+import {
+    initGame, update as gameUpdate, echoShift, getRunTime, gameplayStart, gameplayStop,
+    isMarked, activateEquippedSkill, beginDashCharge, releaseDashCharge, cancelDashCharge,
+    getWorldTimeScale, getNovaRing
+} from './game.js';
+import { SKILL_ORDER, skillRegistry } from './skills.js';
 import { player } from './player.js';
 import { resetAll as resetEnemies, getActiveEnemies } from './enemies.js';
 import * as projectiles from './projectiles.js';
@@ -163,10 +168,55 @@ function render() {
     drawAttackLine(ctx, enemies, t);
     drawPlayer(ctx, t);
     drawEchoCooldownRing(ctx, t);
+    drawSkillVisuals(ctx, t);
     drawPlayerHealthBar(ctx);
     visualEffects.render(ctx, t);
     if (shake.x || shake.y) drawHurtVignette(ctx, canvas.width, canvas.height);
     ctx.restore();
+}
+
+// Skill visuals, drawn under the HUD: the dash afterimage, the dilation tint
+// and the nova ring. All three are cheap outlines rather than filled gradients,
+// which keeps them readable over a busy arena without costing much.
+function drawSkillVisuals(ctx, t) {
+    // Time Dilation: a cold wash plus a pulsing rim on the player, so the state
+    // is obvious without reading the HUD.
+    const scale = getWorldTimeScale();
+    if (scale < 1) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(125, 211, 255, ${0.10 + 0.06 * Math.sin(t * 6)})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(6, 6, 960 - 12, 540 - 12);
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(205, 238, 255, ${0.35 + 0.2 * Math.sin(t * 9)})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, 26, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    // Void Nova: an expanding ring, magenta for the push, cyan-shifted when the
+    // gravity well has inverted it, so the two forms are distinguishable after
+    // the flash is over.
+    const ring = getNovaRing();
+    if (ring) {
+        const t01 = ring.elapsed / ring.life;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = ring.pulling
+            ? `rgba(125, 211, 255, ${(1 - t01) * 0.75})`
+            : `rgba(242, 184, 255, ${(1 - t01) * 0.75})`;
+        ctx.lineWidth = 3 * (1 - t01 * 0.6);
+        ctx.beginPath();
+        ctx.arc(ring.x, ring.y, Math.max(1, ring.radius), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
 }
 
 // Cached arena art: gradient backdrop, centre glow, floor grid and the corner
@@ -630,6 +680,11 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keyup', (e) => {
     const lower = e.key.toLowerCase();
     if (MOVEMENT_KEYS.includes(lower)) keysDown.delete(lower);
+    // Releases a held charge. Guarded on the phase_dash key so the other skills,
+    // which fire on press, are unaffected by the same keyup.
+    if (e.key === ' ') {
+        if (skillRegistry.getEquippedId() === 'phase_dash') releaseDashCharge();
+    }
 });
 
 window.addEventListener('blur', () => {
@@ -653,14 +708,47 @@ function handleOnboardingInput(key) {
     }
 }
 
+// Hotkeys for the selection rail. 1-4 pick a skill directly; Q/E and the mouse
+// wheel step through them. Digit keys are matched by index into the registry's
+// display order rather than hardcoded per skill, so the rail stays the single
+// source of truth for how many skills there are.
+const SKILL_HOTKEYS = ['1', '2', '3', '4', '5', '6'];
+
 function handlePlayingInput(key) {
+    // One activation key for whatever is equipped, so there is only ever one
+    // button to remember.
     if (key === ' ') {
-        player.activateEchoShift();
+        // Phase Dash charges on hold, so the key has to be tracked rather than
+        // fired on press: this is what makes a charged dash possible on desktop.
+        if (skillRegistry.getEquippedId() === 'phase_dash') beginDashCharge();
+        else activateEquippedSkill();
     }
-    
+
+    const digitIndex = SKILL_HOTKEYS.indexOf(key);
+    if (digitIndex !== -1 && digitIndex < SKILL_ORDER.length) {
+        ui.selectSkill(SKILL_ORDER[digitIndex]);
+        return;
+    }
+
+    // Step through the rail without needing a number for each skill
+    if (key === 'q' || key === 'Q') {
+        cycleEquippedSkill(-1);
+        return;
+    }
+    if (key === 'e' || key === 'E' || key === 'Tab') {
+        cycleEquippedSkill(1);
+        return;
+    }
+
     if (key === 'Escape' || key === 'p' || key === 'P') {
         togglePause();
     }
+}
+
+function cycleEquippedSkill(direction) {
+    const index = SKILL_ORDER.indexOf(skillRegistry.getEquippedId());
+    const next = (index + direction + SKILL_ORDER.length) % SKILL_ORDER.length;
+    ui.selectSkill(SKILL_ORDER[next]);
 }
 
 function togglePause() {
@@ -676,6 +764,10 @@ function togglePause() {
         pauseMenu.style.display = 'block';
         keysDown.clear();
         resetTouchStick();
+        // A held dash charge stops being held when the game stops, so returning
+        // from the pause menu cannot release into a dash the player did not ask
+        // for at the time they pressed pause.
+        cancelDashCharge();
         gameState = 'paused';
         gameplayStop();
     }
@@ -721,7 +813,7 @@ function smoothTouchStick(deltaTime) {
 function setupTouchControls() {
     const area = document.getElementById('joystick-area');
     const stick = document.getElementById('joystick-stick');
-    const echoButton = document.getElementById('touch-echo-btn');
+    const skillButton = document.getElementById('touch-skill-btn');
 
     // Reads one pointer position and turns it into a target vector. The origin is
     // wherever the thumb first landed rather than the middle of the circle, which
@@ -797,11 +889,26 @@ function setupTouchControls() {
         area.addEventListener('pointercancel', stopStick);
         area.addEventListener('lostpointercapture', stopStick);
     }
-    if (echoButton) {
-        echoButton.addEventListener('pointerdown', (event) => {
+    if (skillButton) {
+        // The same button fires whatever is equipped, so it tracks the rail
+        // instead of being a dedicated Echo control.
+        skillButton.addEventListener('pointerdown', (event) => {
             event.preventDefault();
             initAudioContext();
-            if (gameState === 'playing') player.activateEchoShift();
+            if (gameState === 'playing') {
+                // Phase Dash charges on hold, matching the keyboard behaviour
+                if (skillRegistry.getEquippedId() === 'phase_dash') beginDashCharge();
+                else activateEquippedSkill();
+            }
         });
+        const releaseSkill = (event) => {
+            if (event && event.preventDefault) event.preventDefault();
+            if (gameState === 'playing' && skillRegistry.getEquippedId() === 'phase_dash') {
+                releaseDashCharge();
+            }
+        };
+        skillButton.addEventListener('pointerup', releaseSkill);
+        skillButton.addEventListener('pointercancel', releaseSkill);
+        skillButton.addEventListener('pointerleave', releaseSkill);
     }
 }

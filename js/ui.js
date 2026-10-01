@@ -2,9 +2,10 @@
 import * as game from './game.js';
 import { player } from './player.js';
 import { upgradeSystem } from './upgrades.js';
-import { perks } from './perks.js';
+import { perks, PERK_STATS } from './perks.js';
 import * as audio from './audio.js';
 import { saveSystem, persistGameSettings } from './save.js';
+import { SKILLS, SKILL_ORDER, skillRegistry } from './skills.js';
 
 // main.js drives the HUD and overlays through this object, so every entry point
 // it calls has to be exposed here.
@@ -12,9 +13,12 @@ export const ui = {
     init() {
         setUpEventListeners();
         initOnboardingWizard();
+        buildSkillRail();
         refreshTitleBest();
     },
     tickHUD,
+    syncSkillRail,
+    selectSkill,
     beginRun,
     closeStatScreen,
     continueFromStatScreen: closeStatScreenAndResume,
@@ -47,23 +51,53 @@ const STAT_ROWS = [
     { key: 'multishot', label: 'Multishot', format: 'multishot' }
 ];
 
-// Echo Shift's own stats. These live on the Skills tab and are bought with
-// ability points, so a new skill can drop its stats in here without touching
-// the character stat ladder.
-const SKILL_STAT_ROWS = [
-    { key: 'echoPower', label: 'Echo Power', format: 'echoPower' },
-    { key: 'echoDuration', label: 'Echo Duration', format: 'echoDuration' },
-    { key: 'echoCooldown', label: 'Echo Cooldown', format: 'echoCooldown' }
-];
+// Every skill's upgradeable parts, read from the registry so a new skill only
+// has to describe its parts there. All of these live on the Skills tab and are
+// bought with ability points, so they never touch the character stat ladder.
+//
+// format names line up with the formatter in renderUpgradeRow. Echo's parts are
+// resolved from the registry like the rest, which is what keeps the Echo Shift
+// card and its parts from being written out twice.
+const SKILL_PART_ROWS = {
+    echo_shift: [
+        { key: 'echoPower', label: 'Echo Power', format: 'echoPower' },
+        { key: 'echoDuration', label: 'Echo Duration', format: 'echoDuration' },
+        { key: 'echoCooldown', label: 'Echo Cooldown', format: 'echoCooldown' }
+    ],
+    time_dilation: [
+        { key: 'tdPower', label: 'Dilation Power', format: 'tdPower' },
+        { key: 'tdDuration', label: 'Duration', format: 'tdDuration' },
+        { key: 'tdCooldown', label: 'Cooldown', format: 'tdCooldown' },
+        { key: 'tdSlowCap', label: 'Slow Cap', format: 'tdSlowCap' }
+    ],
+    phase_dash: [
+        { key: 'pdDistance', label: 'Dash Distance', format: 'pdDistance' },
+        { key: 'pdIFrames', label: 'Invulnerability', format: 'pdIFrames' },
+        { key: 'pdCooldown', label: 'Cooldown', format: 'pdCooldown' },
+        { key: 'pdChargedDash', label: 'Charged Dash', format: 'pdChargedDash' }
+    ],
+    void_nova: [
+        { key: 'vnRadius', label: 'Nova Radius', format: 'vnRadius' },
+        { key: 'vnForce', label: 'Nova Force', format: 'vnForce' },
+        { key: 'vnCooldown', label: 'Cooldown', format: 'vnCooldown' },
+        { key: 'vnGravityWell', label: 'Gravity Well', format: 'vnGravityWell' }
+    ]
+};
 
 // Perks are offered for every stat, including the skill ones. Kept as its own
 // list because the Perks tab has always shown the echo stats between Critical
 // Damage and Multishot, and moving them to Skills must not reshuffle that tab.
+// Every stat that carries perk tiers, in the same order as the perks screen.
+// Each skill's own parts sit together so a player reading a skill's milestones
+// sees them under that skill rather than scattered across the screen.
 const PERK_ROWS = [
     ...STAT_ROWS.slice(0, 7),
-    ...SKILL_STAT_ROWS,
+    ...SKILL_PART_ROWS.echo_shift,
+    ...SKILL_PART_ROWS.time_dilation,
+    ...SKILL_PART_ROWS.phase_dash,
+    ...SKILL_PART_ROWS.void_nova,
     ...STAT_ROWS.slice(7)
-];
+].filter((row) => PERK_STATS.includes(row.key));
 
 // Number keys buy a point in the matching stat, in screen order
 const QUICK_KEY_STATS = STAT_ROWS.map((stat) => stat.key);
@@ -77,6 +111,9 @@ const UPGRADE_TABS = [
 export function tickHUD() {
     if (!game.gameState) return;
     updateHUD();
+    // The rail and the single indicator are driven from the same tick, so a
+    // cooldown that expires while paused cannot be left showing stale time
+    syncSkillRail();
 }
 
 export function openLevelUpStatScreen() {
@@ -317,9 +354,6 @@ function updateHUD() {
     setText('wave-display', `Wave ${game.getCurrentWave()}`);
     setText('time-display', game.formatTime(game.getRunTime()));
     setText('best-display', `Best ${game.formatTime(saveSystem.saveData.bestTime || 0)}`);
-
-    // Echo Shift indicator
-    updateEchoShiftIndicator();
 }
 
 const hudCache = new Map();
@@ -462,6 +496,33 @@ function renderUpgradeRow(stat, availablePoints) {
             formatText = `${current.toFixed(1)} sec`;
         } else if (stat.format === 'multishot') {
         formatText = `${current} shot${current === 1 ? '' : 's'}`;
+        // Time Dilation: power reads as a speed multiplier, the cap as a tax
+        } else if (stat.format === 'tdPower') {
+            formatText = `${Math.round(current * 100)}% world speed`;
+        } else if (stat.format === 'tdDuration') {
+            formatText = `${current.toFixed(1)} sec`;
+        } else if (stat.format === 'tdCooldown') {
+            formatText = `${current.toFixed(1)} sec`;
+        } else if (stat.format === 'tdSlowCap') {
+            formatText = current === 0 ? 'None' : `-${Math.round(current * 100)}% speed`;
+        // Phase Dash
+        } else if (stat.format === 'pdDistance') {
+            formatText = `${current} px`;
+        } else if (stat.format === 'pdIFrames') {
+            formatText = `${current.toFixed(2)} sec`;
+        } else if (stat.format === 'pdCooldown') {
+            formatText = `${current.toFixed(2)} sec`;
+        } else if (stat.format === 'pdChargedDash') {
+            formatText = current === 0 ? 'Not yet' : `${Math.round(current * 100)}% charge power`;
+        // Void Nova
+        } else if (stat.format === 'vnRadius') {
+            formatText = `${current} px`;
+        } else if (stat.format === 'vnForce') {
+            formatText = `${current.toFixed(2)}x`;
+        } else if (stat.format === 'vnCooldown') {
+            formatText = `${current.toFixed(2)} sec`;
+        } else if (stat.format === 'vnGravityWell') {
+            formatText = current === 0 ? 'Not yet' : current >= 1 ? 'Pulls inward' : `${Math.round(current * 100)}%`;
     }
 
     // A stat can cost more than one point, so the button has to compare the
@@ -546,55 +607,142 @@ function renderPerksTab() {
     return html;
 }
 
-// Skills tab. Each skill owns its upgradeable stats, bought with ability
-// points, so adding a skill later means adding a card and a stat group here
-// without touching the character stat ladder.
+// Skills tab. Every skill is a card built from the registry, so adding a
+// skill means adding its parts to SKILL_PART_ROWS and nothing else here.
 function renderSkillsTab() {
-    const echo = game.echoShift;
     const abilityPoints = upgradeSystem.getAvailableAbilityPoints();
-    let status = 'Ready';
-    if (echo && game.gameState && !game.gameState.isPaused) {
-        const remaining = echo.lastUsed + echo.cooldown - game.getRunTime();
-        if (remaining > 0) status = `Recharging (${remaining.toFixed(1)}s)`;
-    }
+    const equippedId = skillRegistry.getEquippedId();
 
-    let echoRows = '<div class="stats-grid skill-stats-grid">';
-    SKILL_STAT_ROWS.forEach((stat) => {
-        echoRows += renderUpgradeRow(stat, abilityPoints);
-    });
-    echoRows += '</div>';
+    let cards = '';
+    for (const id of SKILL_ORDER) {
+        const skill = SKILLS[id];
+        const rows = SKILL_PART_ROWS[id] || [];
+        const remaining = skillRegistry.getCooldownRemaining(id);
+        const isEquipped = id === equippedId;
+        const status = remaining > 0 ? `Recharging (${remaining.toFixed(1)}s)` : 'Ready';
+
+        let statRows = '<div class="stats-grid skill-stats-grid">';
+        for (const row of rows) statRows += renderUpgradeRow(row, abilityPoints);
+        statRows += '</div>';
+
+        cards += `
+            <div class="skill-card ${isEquipped ? 'equipped' : ''}" data-skill="${id}"
+                 style="--skill-color: ${skill.color}; --skill-accent: ${skill.accent}">
+                <div class="skill-head">
+                    <span class="skill-name">${skill.name}</span>
+                    <span class="skill-key">${skill.key}</span>
+                </div>
+                <p class="skill-desc">${skill.description}</p>
+                <div class="skill-stats">
+                    <span class="skill-stat">Status: ${status}</span>
+                    ${isEquipped ? '<span class="skill-stat skill-equipped-tag">Equipped</span>' : ''}
+                </div>
+                ${statRows}
+            </div>
+        `;
+    }
 
     return `
         <div class="skills-intro">
-            Skills are triggered while you are playing. Each skill is upgraded
-            with Ability Points, earned on every level up and spent only here.
+            Skills fire with SPACE (or the SKILL button on mobile) and switch
+            with 1-4 or by tapping the rail on the right of the arena. Each is
+            upgraded with Ability Points, earned on every level up and spent only
+            here. Only the equipped skill shows a cooldown bar, but the others
+            keep recharging in the background.
         </div>
-        <div class="skills-grid">
-            <div class="skill-card">
-                <div class="skill-head">
-                    <span class="skill-name">Echo Shift</span>
-                    <span class="skill-key">SPACE</span>
-                </div>
-                <p class="skill-desc">
-                    Freeze the path you just walked and send an echo back along it.
-                    The line snaps into place almost instantly, then stands as a
-                    solid wall: enemies cannot cross it, and anything pressed
-                    against it keeps burning. The wall holds for the duration.
-                </p>
-                <div class="skill-stats">
-                    <span class="skill-stat">Status: ${status}</span>
-                </div>
-                ${echoRows}
-            </div>
-            <div class="skill-card locked">
-                <div class="skill-head">
-                    <span class="skill-name">???</span>
-                    <span class="skill-key">LOCKED</span>
-                </div>
-                <p class="skill-desc">More skills are on the way.</p>
-            </div>
-        </div>
+        <div class="skills-grid">${cards}</div>
     `;
+}
+
+// --- Skill rail and the single cooldown indicator ---------------------------
+
+// Rebuilt once at init and only ever restyled afterwards, so switching skills
+// during a run cannot churn the DOM.
+function buildSkillRail() {
+    const rail = document.getElementById('skill-rail');
+    if (!rail) return;
+    rail.innerHTML = SKILL_ORDER.map((id, i) => {
+        const skill = SKILLS[id];
+        return `
+            <button class="skill-chip" data-skill="${id}" title="${skill.name} (${skill.key})"
+                    style="--skill-color: ${skill.color}; --skill-accent: ${skill.accent}">
+                <span class="skill-chip-key">${i + 1}</span>
+                <span class="skill-chip-name">${skill.shortName}</span>
+                <span class="skill-chip-cd"></span>
+            </button>
+        `;
+    }).join('');
+
+    // One delegated listener, so it survives any later innerHTML changes
+    rail.addEventListener('click', (e) => {
+        const chip = e.target.closest && e.target.closest('.skill-chip');
+        if (chip && chip.dataset.skill) selectSkill(chip.dataset.skill);
+    });
+
+    syncSkillRail();
+}
+
+export function selectSkill(id) {
+    if (!SKILLS[id]) return;
+    skillRegistry.equip(id);
+    // Holding a dash charge and switching away must not strand the charge: the
+    // next time Phase Dash is equipped, SPACE would fire a stale full-charge
+    // dash the player never asked for. Imported lazily to avoid the ui/game
+    // import cycle at module load.
+    if (id !== 'phase_dash') {
+        import('./game.js').then((g) => g.cancelDashCharge());
+    }
+    syncSkillRail();
+    // The Skills tab marks the equipped card, so it has to follow a switch made
+    // out here during a run
+    if (statScreenMode !== 'manual') renderStatScreen();
+}
+
+// Repaints the rail and the indicator. Cheap enough to run every HUD tick; the
+// only writes are text and a colour, and only when the value actually changed.
+export function syncSkillRail() {
+    const equippedId = skillRegistry.getEquippedId();
+    const equipped = SKILLS[equippedId];
+
+    const chips = document.querySelectorAll('#skill-rail .skill-chip');
+    chips.forEach((chip) => {
+        const id = chip.dataset.skill;
+        const isEquipped = id === equippedId;
+        chip.classList.toggle('equipped', isEquipped);
+        // A chip that is cooling down but not equipped still says so, dimly, so
+        // switching to it is an informed choice rather than a guess
+        const remaining = skillRegistry.getCooldownRemaining(id);
+        chip.classList.toggle('cooling', remaining > 0.001 && !isEquipped);
+        const cd = chip.querySelector('.skill-chip-cd');
+        if (cd) cd.textContent = remaining > 0.001 ? `${remaining.toFixed(0)}s` : '';
+    });
+
+    const indicator = document.getElementById('skill-indicator');
+    if (!indicator) return;
+    const remaining = skillRegistry.getCooldownRemaining(equippedId);
+    const total = skillRegistry.getCooldownFor(equippedId) || 0;
+
+    // Hidden entirely when the skill is ready, which keeps the screen clean
+    // between fights. The only thing on screen is the skill that needs attention.
+    indicator.style.display = remaining > 0.001 ? 'block' : 'none';
+
+    const label = document.getElementById('skill-indicator-label');
+    if (label) label.textContent = `${equipped.shortName} RECHARGING`;
+    const time = document.getElementById('skill-indicator-time');
+    if (time) time.textContent = `${remaining.toFixed(1)}s`;
+    const fill = document.getElementById('skill-indicator-fill');
+    if (fill) {
+        // Draining: the bar empties as the skill recovers
+        const ratio = total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0;
+        fill.style.width = `${ratio * 100}%`;
+    }
+    // Repainted in the equipped skill's own colour, so the bar is identifiable
+    // at a glance as belonging to the skill that is actually selected
+    indicator.style.setProperty('--skill-color', equipped.color);
+    indicator.style.setProperty('--skill-accent', equipped.accent);
+
+    const touchBtn = document.getElementById('touch-skill-btn');
+    if (touchBtn) touchBtn.textContent = equipped.shortName;
 }
 
 function closeStatScreenAndResume() {
@@ -629,37 +777,6 @@ function calculateBonus(statKey, current, base) {
 
 function trim(value) {
     return String(Math.round(value * 100) / 100);
-}
-
-// Update Echo Shift indicator
-function updateEchoShiftIndicator() {
-    const indicator = document.getElementById('echo-shift-indicator');
-    const cooldownText = document.getElementById('echo-shift-cooldown');
-    const shiftText = document.getElementById('echo-shift-text');
-    
-    if (!indicator) return;
-    
-    const lastUsed = game.echoShift ? game.echoShift.lastUsed : 0;
-    const cooldown = game.echoShift ? game.echoShift.cooldown : 15.0;
-    const timeSinceUsed = game.getRunTime() - lastUsed;
-    const remainingCooldown = Math.max(0, cooldown - timeSinceUsed);
-    
-    if (!game.echoShift || game.gameState.isPaused || game.gameState.statAllocationOpen
-        || document.getElementById('game-over').style.display === 'block'
-        || document.getElementById('onboarding').style.display !== 'none') {
-        indicator.style.display = 'none';
-        return;
-    }
-    
-    indicator.style.display = 'block';
-    
-    if (remainingCooldown > 0.05) {
-        cooldownText.textContent = remainingCooldown.toFixed(1) + 's';
-        shiftText.textContent = 'ECHO SHIFT: ' + remainingCooldown.toFixed(1) + 's';
-    } else {
-        cooldownText.textContent = 'READY';
-        shiftText.textContent = 'ECHO SHIFT: READY';
-    }
 }
 
 function quitToTitle() {
