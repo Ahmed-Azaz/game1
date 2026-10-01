@@ -398,7 +398,12 @@ function drawPlayer(ctx, t) {
     ctx.save();
     ctx.translate(player.x, player.y + Math.sin(t * 4));
 
-    const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, 36);
+// Drawn at half scale to match the halved hitbox and the enemies. Scaling the
+// whole body rather than restating each number keeps the silhouette honest: the
+// ring, the orbits and the hull all stay in proportion to player.radius.
+ctx.scale(0.5, 0.5);
+
+const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, 36);
     aura.addColorStop(0, 'rgba(56,155,170,.22)');
     aura.addColorStop(1, 'rgba(71,205,220,0)');
     ctx.fillStyle = aura;
@@ -452,6 +457,12 @@ function drawPlayer(ctx, t) {
 }
 
 // Persistent cooldown ring, so readiness is readable without looking at the HUD.
+// The ring sits just outside the hull, so it tracks the body size rather than
+// carrying a hardcoded radius that would drift out of proportion
+function cooldownRingRadius() {
+    return Math.max(12, player.radius * 2);
+}
+
 function drawEchoCooldownRing(ctx, t) {
     if (!echoShift) return;
     const remaining = Math.max(0, echoShift.cooldown - (getRunTime() - echoShift.lastUsed));
@@ -462,7 +473,7 @@ function drawEchoCooldownRing(ctx, t) {
         ctx.lineWidth = 1.5;
         ctx.setLineDash([3, 6]);
         ctx.beginPath();
-        ctx.arc(player.x, player.y, 24, 0, Math.PI * 2);
+        ctx.arc(player.x, player.y, cooldownRingRadius(), 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
         return;
@@ -472,25 +483,28 @@ function drawEchoCooldownRing(ctx, t) {
     ctx.save();
     ctx.strokeStyle = 'rgba(120,140,190,.28)';
     ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(player.x, player.y, 24, 0, Math.PI * 2);
+ctx.beginPath();
+    ctx.arc(player.x, player.y, cooldownRingRadius(), 0, Math.PI * 2);
     ctx.stroke();
     ctx.strokeStyle = 'rgba(182,154,255,.85)';
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.arc(player.x, player.y, 24, -Math.PI / 2, -Math.PI / 2 + (1 - ratio) * Math.PI * 2);
+    ctx.arc(player.x, player.y, cooldownRingRadius(), -Math.PI / 2, -Math.PI / 2 + (1 - ratio) * Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 }
 
 function drawPlayerHealthBar(ctx) {
     const ratio = Math.max(0, player.hp / player.maxHP);
-    const bw = 42;
+    // Halved with the body. The bar is a readability aid, so it keeps a minimum
+    // width rather than shrinking to nothing on a small player.
+    const bw = Math.max(21, player.radius * 2.8);
+    const above = Math.max(16, player.radius * 2);
     ctx.fillStyle = 'rgba(3,7,17,.9)';
-    ctx.fillRect(player.x - bw / 2 - 2, player.y - 31, bw + 4, 5);
+    ctx.fillRect(player.x - bw / 2 - 2, player.y - above, bw + 4, 5);
     ctx.fillStyle = ratio > .3 ? '#72f4d1' : '#ff8278';
-    ctx.fillRect(player.x - bw / 2, player.y - 30, bw * ratio, 3);
+    ctx.fillRect(player.x - bw / 2, player.y - above + 1, bw * ratio, 3);
 }
 
 function drawHurtVignette(ctx, w, h) {

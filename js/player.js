@@ -5,7 +5,9 @@ import { perks } from './perks.js';
 import { spawnHit, triggerScreenShake } from './visual-effects.js';
 
 export const player = {
-    radius: 15,
+    // Half of the old 15, matching the enemy scale. This one number is the whole
+    // hitbox: enemy contact, projectile hits and fragment pickup all read it.
+    radius: 7.5,
     // Position and physics - initialized in game start
     x: 0,
     y: 0,
