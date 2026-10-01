@@ -770,17 +770,40 @@ body {
 #settings-panel input[type="range"] { width: 100%; accent-color: #69efff; }
 #settings-panel button { margin-top: 12px; padding: 10px 20px; cursor: pointer; }
 #joystick-area {
-    width: clamp(92px, 17vw, 120px);
-    height: clamp(92px, 17vw, 120px);
-    bottom: max(18px, env(safe-area-inset-bottom));
-    left: max(18px, env(safe-area-inset-left));
+    width: clamp(78px, 13.5vw, 100px);
+    height: clamp(78px, 13.5vw, 100px);
+    bottom: max(14px, env(safe-area-inset-bottom));
+    left: max(14px, env(safe-area-inset-left));
 }
 #touch-echo-btn {
-    width: clamp(64px, 13vw, 80px);
-    height: clamp(64px, 13vw, 80px);
-    line-height: clamp(60px, 12vw, 76px);
-    bottom: max(22px, env(safe-area-inset-bottom));
-    right: max(22px, env(safe-area-inset-right));
+    width: clamp(52px, 9.5vw, 62px);
+    height: clamp(52px, 9.5vw, 62px);
+    line-height: clamp(50px, 9vw, 60px);
+    bottom: max(16px, env(safe-area-inset-bottom));
+    right: max(16px, env(safe-area-inset-right));
+    font-size: 11px;
+}
+
+/* The knob scales with the base so it keeps the same proportion at every size.
+   Percentage margins resolve against the containing block's width, and the base
+   is square, so one value serves both axes. */
+#joystick-stick {
+    width: 42%;
+    height: 42%;
+    margin-top: -21%;
+    margin-left: -21%;
+}
+
+/* Left-handed layout: movement on the right thumb, Shift on the left. These
+   override the offsets above, so the swap is a class flip rather than a second
+   set of rules to keep in step. */
+#touch-controls.mirrored #joystick-area {
+    left: auto;
+    right: max(14px, env(safe-area-inset-right));
+}
+#touch-controls.mirrored #touch-echo-btn {
+    right: auto;
+    left: max(16px, env(safe-area-inset-left));
 }
 
 /* Title card */

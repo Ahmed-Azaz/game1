@@ -98,6 +98,7 @@ function gameLoop(timestamp) {
     
     // Update game systems
     if (gameState === 'playing') {
+        smoothTouchStick(deltaTime);
         player.update(deltaTime, keysDown, joystickVector);
         visualEffects.update(deltaTime);
         gameUpdate(deltaTime);
@@ -109,7 +110,7 @@ function gameLoop(timestamp) {
     } else {
         // Held movement keys must not leak across pause, death, or menus
         keysDown.clear();
-        joystickVector.x = joystickVector.y = 0;
+        resetTouchStick();
     }
     
     render();
@@ -633,12 +634,12 @@ document.addEventListener('keyup', (e) => {
 
 window.addEventListener('blur', () => {
     keysDown.clear();
-    joystickVector.x = joystickVector.y = 0;
+    resetTouchStick();
 });
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         keysDown.clear();
-        joystickVector.x = joystickVector.y = 0;
+        resetTouchStick();
         // Leaving the tab ends the run for the portal's gameplay tracking
         syncStateFromDOM();
         if (gameState === 'playing') togglePause();
@@ -674,7 +675,7 @@ function togglePause() {
     } else {
         pauseMenu.style.display = 'block';
         keysDown.clear();
-        joystickVector.x = joystickVector.y = 0;
+        resetTouchStick();
         gameState = 'paused';
         gameplayStop();
     }
@@ -683,43 +684,112 @@ function togglePause() {
 // Initialize on load
 window.addEventListener('load', init);
 
+// Touch input state. The vector the player reads is smoothed toward `target`
+// once per frame rather than snapping to the finger, because a thumb resting on
+// glass never stops trembling and that tremble should not become a walk.
+const TOUCH_DEADZONE = 0.12;    // fraction of the stick's travel
+const TOUCH_RESPONSE = 22;      // higher snaps to the finger faster
+const touchStick = {
+    pointerId: null,
+    originX: 0,
+    originY: 0,
+    targetX: 0,
+    targetY: 0
+};
+
+// Every path that clears the stick goes through here, so the smoothed vector and
+// the raw target can never disagree about whether the thumb is down.
+function resetTouchStick() {
+    touchStick.pointerId = null;
+    touchStick.targetX = 0;
+    touchStick.targetY = 0;
+    joystickVector.x = 0;
+    joystickVector.y = 0;
+}
+
+// Exponential smoothing toward the target, framerate independent. Release is
+// handled by resetTouchStick instead, so letting go stops the player outright
+// rather than coasting for a few frames.
+function smoothTouchStick(deltaTime) {
+    const blend = 1 - Math.exp(-TOUCH_RESPONSE * deltaTime);
+    joystickVector.x += (touchStick.targetX - joystickVector.x) * blend;
+    joystickVector.y += (touchStick.targetY - joystickVector.y) * blend;
+    if (Math.abs(joystickVector.x) < 0.001) joystickVector.x = 0;
+    if (Math.abs(joystickVector.y) < 0.001) joystickVector.y = 0;
+}
+
 function setupTouchControls() {
     const area = document.getElementById('joystick-area');
     const stick = document.getElementById('joystick-stick');
     const echoButton = document.getElementById('touch-echo-btn');
-    let pointerId = null;
 
+    // Reads one pointer position and turns it into a target vector. The origin is
+    // wherever the thumb first landed rather than the middle of the circle, which
+    // is what lets a short flick in any direction register at full deflection.
     const updateStick = (event) => {
-        if (pointerId !== event.pointerId) return;
+        if (touchStick.pointerId !== event.pointerId) return;
         const rect = area.getBoundingClientRect();
         const maxDistance = rect.width * .34;
-        let dx = event.clientX - (rect.left + rect.width / 2);
-        let dy = event.clientY - (rect.top + rect.height / 2);
+        let dx = event.clientX - touchStick.originX;
+        let dy = event.clientY - touchStick.originY;
         const distance = Math.hypot(dx, dy);
+
+        // The knob stops at the rim, but the vector keeps reading the true finger
+        // distance so that pushing past the rim holds full tilt instead of
+        // sliding sideways along the edge
+        let travelX = dx;
+        let travelY = dy;
         if (distance > maxDistance) {
-            dx = dx / distance * maxDistance;
-            dy = dy / distance * maxDistance;
+            travelX = dx / distance * maxDistance;
+            travelY = dy / distance * maxDistance;
         }
-        if (gameState !== 'playing') { joystickVector.x = joystickVector.y = 0; return; }
-        joystickVector.x = dx / maxDistance;
-        joystickVector.y = dy / maxDistance;
-        stick.style.transform = `translate(${dx}px, ${dy}px)`;
+        stick.style.transform = `translate(${travelX}px, ${travelY}px)`;
+
+        if (gameState !== 'playing') {
+            touchStick.targetX = 0;
+            touchStick.targetY = 0;
+            return;
+        }
+
+        // A thumb that lands near the rim starts tilted, which would fling the
+        // player on the first frame. The origin is the touch point, so the tilt
+        // is zero at touchdown and only grows from real thumb movement.
+        const magnitude = Math.min(1, distance / maxDistance);
+        if (magnitude <= TOUCH_DEADZONE) {
+            touchStick.targetX = 0;
+            touchStick.targetY = 0;
+            return;
+        }
+        // Rescale past the deadzone so control still reaches full tilt at the rim.
+        // Without this the outer part of the travel is dead, because the deadzone
+        // eats into the maximum.
+        const strength = (magnitude - TOUCH_DEADZONE) / (1 - TOUCH_DEADZONE);
+        touchStick.targetX = (dx / distance) * strength;
+        touchStick.targetY = (dy / distance) * strength;
     };
+
     const stopStick = (event) => {
-        if (pointerId !== event.pointerId) return;
-        pointerId = null;
-        joystickVector.x = joystickVector.y = 0;
+        if (touchStick.pointerId !== event.pointerId) return;
+        resetTouchStick();
         stick.style.transform = 'translate(0px, 0px)';
         if (area.hasPointerCapture(event.pointerId)) area.releasePointerCapture(event.pointerId);
     };
 
     if (area && stick) {
         area.addEventListener('pointerdown', (event) => {
-            if (pointerId !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
+            if (touchStick.pointerId !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
             event.preventDefault();
-            pointerId = event.pointerId;
-            area.setPointerCapture(pointerId);
+            touchStick.pointerId = event.pointerId;
+            area.setPointerCapture(touchStick.pointerId);
             initAudioContext();
+            touchStick.originX = event.clientX;
+            touchStick.originY = event.clientY;
+            // Start from rest on touchdown so a held thumb never resumes from the
+            // previous stick position
+            touchStick.targetX = 0;
+            touchStick.targetY = 0;
+            joystickVector.x = 0;
+            joystickVector.y = 0;
             updateStick(event);
         });
         area.addEventListener('pointermove', updateStick);

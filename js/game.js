@@ -574,7 +574,10 @@ export function loadGameSettings() {
             // A phone gets the cheapest tier unless the player picks otherwise:
             // this is the one default worth choosing for them
             particleQuality: quality.defaultSetting(),
-            screenShake: true
+            screenShake: true,
+            // Left-handed play mirrors the touch layout. Default off, so the
+            // existing layout is what an unconfigured player sees.
+            reverseTouchControls: false
         };
 }
 
@@ -582,8 +585,19 @@ export function saveGameSettings(settings) {
     saveSystem.updateSettings(settings);
 }
 
+// Left-handed play swaps which thumb rests on movement and which on Shift. The
+// layout itself is pure CSS, so all this has to do is flip one class.
+export function applyTouchLayout(reversed) {
+    const controls = document.getElementById('touch-controls');
+    if (!controls) return;
+    controls.classList.toggle('mirrored', !!reversed);
+}
+
 export function applyGameSettings(settings) {
     if (!settings) return;
+    if (settings.reverseTouchControls !== undefined) {
+        applyTouchLayout(settings.reverseTouchControls);
+    }
     if (settings.masterVolume !== undefined) {
         audio.setMasterVolume(settings.masterVolume);
     }

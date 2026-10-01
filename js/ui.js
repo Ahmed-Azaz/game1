@@ -221,6 +221,7 @@ function setUpEventListeners() {
     }
     const particleQuality = document.getElementById('particle-quality');
     const screenShake = document.getElementById('screen-shake');
+    const reverseTouch = document.getElementById('reverse-touch-controls');
     const settings = game.loadGameSettings();
     if (particleQuality) {
         particleQuality.value = settings.particleQuality || 'medium';
@@ -233,6 +234,13 @@ function setUpEventListeners() {
         screenShake.checked = settings.screenShake !== false;
         screenShake.addEventListener('change', (e) => {
             persistGameSettings({ screenShake: e.target.checked });
+            game.applyGameSettings(game.loadGameSettings());
+        });
+    }
+    if (reverseTouch) {
+        reverseTouch.checked = settings.reverseTouchControls === true;
+        reverseTouch.addEventListener('change', (e) => {
+            persistGameSettings({ reverseTouchControls: e.target.checked });
             game.applyGameSettings(game.loadGameSettings());
         });
     }

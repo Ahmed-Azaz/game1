@@ -12,7 +12,9 @@ export const saveSystem = {
             masterVolume: 0.7,
             sfxVolume: 0.7,
             particleQuality: 'medium',
-            screenShake: true
+            screenShake: true,
+            // Left-handed layout: movement on the right thumb, Shift on the left
+            reverseTouchControls: false
         },
         onboardingCompleted: false
     },
@@ -96,6 +98,11 @@ function uiSettingsApply(settings) {
     }
     if (settings.screenShake !== undefined) {
         import('./visual-effects.js').then((fx) => fx.setScreenShakeEnabled(settings.screenShake));
+    }
+    if (settings.reverseTouchControls !== undefined) {
+        // The layout is a class on the touch overlay, so it applies directly
+        // rather than through a module that has to be imported first
+        document.getElementById('touch-controls')?.classList.toggle('mirrored', !!settings.reverseTouchControls);
     }
 }
 

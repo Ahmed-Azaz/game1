@@ -91,9 +91,15 @@ export const player = {
             dy = joystickVector.y;
         }
 
-        // Normalize diagonal movement
-        if (dx !== 0 && dy !== 0) {
-            const length = Math.sqrt(dx * dx + dy * dy);
+        // Shorten anything past the rim rather than every diagonal. Keyboard input
+        // is digital, so its diagonals land over 1 and get renormalized here and
+        // move at the same speed as a straight line. The stick is analog and
+        // reports a magnitude at or below 1, so it passes through untouched: the
+        // old any-diagonal normalization made a gentle push on a diagonal run at
+        // full speed while the same push straight ahead crawled, which is what
+        // made the stick feel unresponsive.
+        const length = Math.sqrt(dx * dx + dy * dy);
+        if (length > 1) {
             dx /= length;
             dy /= length;
         }
