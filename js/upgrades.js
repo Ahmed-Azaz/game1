@@ -43,6 +43,15 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
         multishot: { base: 1, points: 0, increment: 1, cost: 3 }
     },
 
+    // Stats that belong to a skill rather than to the character, and are bought
+    // with ability points. They stay in `stats` so perks and the resolved stat
+    // block keep working unchanged; only the currency they spend is different.
+    skillStats: ['echoPower', 'echoDuration', 'echoCooldown'],
+
+    isSkillStat(statKey) {
+        return this.skillStats.indexOf(statKey) !== -1;
+    },
+
     // Stat points a single point of this stat costs. Multishot is 3, everything
     // else is the default 1.
     statCost(statKey) {
@@ -52,9 +61,17 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
     
     // Level-up awards +3 stat points (from Level 2 onwards)
     levelUpPoints: 3,
+
+    // ...and a separate +3 ability points for the skill stats. Two currencies
+    // keep a player from having to choose between a stat and the skill they use
+    // every few seconds, and it leaves room to give a skill its own economy.
+    levelUpAbilityPoints: 3,
     
     // Current stat points available
     availablePoints: 0,
+
+    // Current ability points available, spent only in the Skills tab
+    availableAbilityPoints: 0,
     
     // Stats are per-run: a run always starts from base values, and only
     // lifetime records (time, level, kills) survive a reload.
@@ -64,6 +81,7 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
     
     reset() {
         this.availablePoints = 0;
+        this.availableAbilityPoints = 0;
         for (const key of Object.keys(this.stats)) {
             this.stats[key].points = 0;
         }
@@ -122,10 +140,25 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
     getAvailablePoints() {
         return this.availablePoints;
     },
+
+    getAvailableAbilityPoints() {
+        return this.availableAbilityPoints;
+    },
     
     addStatPoints(amount) {
         this.availablePoints = Math.max(0, this.availablePoints + amount);
         return this.availablePoints;
+    },
+
+    addAbilityPoints(amount) {
+        this.availableAbilityPoints = Math.max(0, this.availableAbilityPoints + amount);
+        return this.availableAbilityPoints;
+    },
+
+    // The pool a stat spends from. Skill stats are paid for in ability points,
+    // everything else in stat points.
+    pointsFor(statKey) {
+        return this.isSkillStat(statKey) ? this.availableAbilityPoints : this.availablePoints;
     },
     
     spendStatPoint(statKey) {
@@ -135,7 +168,7 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
     canSpendPoint(statKey) {
         if (!this.stats[statKey]) return false;
         if (this.isMaxed(statKey)) return false;
-        return this.availablePoints >= this.statCost(statKey);
+        return this.pointsFor(statKey) >= this.statCost(statKey);
     },
 
     // True when another point cannot move this stat at all, because the ladder
@@ -164,10 +197,12 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
         if (this.isMaxed(statKey)) return false;
 
         const cost = this.statCost(statKey);
-        if (this.availablePoints < cost) return false;
+        const isSkill = this.isSkillStat(statKey);
+        if (this.pointsFor(statKey) < cost) return false;
         
         this.stats[statKey].points += 1;
-        this.availablePoints -= cost;
+        if (isSkill) this.availableAbilityPoints -= cost;
+        else this.availablePoints -= cost;
         
         this.recalculateAllStats();
         
@@ -187,6 +222,10 @@ export function getStats() {
 
 export function getAvailablePoints() {
     return upgradeSystem.availablePoints;
+}
+
+export function getAvailableAbilityPoints() {
+    return upgradeSystem.availableAbilityPoints;
 }
 
 export function trySpendPoint(statKey) {

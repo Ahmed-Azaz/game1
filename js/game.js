@@ -351,6 +351,7 @@ export function levelUp() {
         gameState.xpRequired = Math.floor(gameState.xpRequired * 1.5);
         
         upgradeSystem.addStatPoints(upgradeSystem.levelUpPoints);
+        upgradeSystem.addAbilityPoints(upgradeSystem.levelUpAbilityPoints);
         gameState.statPoints = upgradeSystem.getAvailablePoints();
         applyPlayerStats({ healOnLevelUp: true });
         audio.play('level-up');

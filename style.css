@@ -627,6 +627,13 @@ body {
     color: var(--accent-cyan);
 }
 
+/* The skill's own upgrade rows, reusing the stat row layout inside the card */
+.skill-stats-grid {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(125, 167, 215, 0.12);
+}
+
 #continue-btn {
     background: var(--accent-cyan);
     color: var(--bg-primary);

@@ -44,13 +44,28 @@ const STAT_ROWS = [
     { key: 'attackRange', label: 'Attack Range', format: 'attackRange' },
     { key: 'criticalChance', label: 'Critical Chance', format: 'criticalChance' },
     { key: 'criticalDamage', label: 'Critical Damage', format: 'criticalDamage' },
-    { key: 'echoPower', label: 'Echo Power', format: 'echoPower' },
-    { key: 'echoDuration', label: 'Echo Duration', format: 'echoDuration' },
-    { key: 'echoCooldown', label: 'Echo Cooldown', format: 'echoCooldown' },
     { key: 'multishot', label: 'Multishot', format: 'multishot' }
 ];
 
-// Number keys 1-12 buy a point in the matching stat, in screen order
+// Echo Shift's own stats. These live on the Skills tab and are bought with
+// ability points, so a new skill can drop its stats in here without touching
+// the character stat ladder.
+const SKILL_STAT_ROWS = [
+    { key: 'echoPower', label: 'Echo Power', format: 'echoPower' },
+    { key: 'echoDuration', label: 'Echo Duration', format: 'echoDuration' },
+    { key: 'echoCooldown', label: 'Echo Cooldown', format: 'echoCooldown' }
+];
+
+// Perks are offered for every stat, including the skill ones. Kept as its own
+// list because the Perks tab has always shown the echo stats between Critical
+// Damage and Multishot, and moving them to Skills must not reshuffle that tab.
+const PERK_ROWS = [
+    ...STAT_ROWS.slice(0, 7),
+    ...SKILL_STAT_ROWS,
+    ...STAT_ROWS.slice(7)
+];
+
+// Number keys buy a point in the matching stat, in screen order
 const QUICK_KEY_STATS = STAT_ROWS.map((stat) => stat.key);
 
 const UPGRADE_TABS = [
@@ -319,6 +334,7 @@ function renderStatScreen() {
     pendingUnlocks = pendingUnlocks.concat(game.consumePerkUnlocks());
 
     const availablePoints = upgradeSystem.getAvailablePoints();
+    const abilityPoints = upgradeSystem.getAvailableAbilityPoints();
 
     const html = `
         <div id="stat-screen" class="screen" style="display: block;">
@@ -339,7 +355,9 @@ function renderStatScreen() {
                     ${renderActiveTab()}
                 </div>
                 <div class="stat-points">
-                    Available Stat Points: ${availablePoints}<br>
+                    ${activeTab === 'skills'
+                        ? `Available Ability Points: ${abilityPoints}`
+                        : `Available Stat Points: ${availablePoints}`}<br>
                     <button id="continue-btn">Continue</button>
                 </div>
             </div>
@@ -358,7 +376,7 @@ function renderStatScreen() {
 }
 
 function statLabel(statKey) {
-    const row = STAT_ROWS.find((r) => r.key === statKey);
+    const row = PERK_ROWS.find((r) => r.key === statKey);
     return row ? row.label : statKey;
 }
 
@@ -378,9 +396,9 @@ function showStatNotice(message) {
     statNoticeTimer = setTimeout(() => {
         statNotice = '';
         statNoticeTimer = null;
-        if (activeTab === 'stats') renderStatScreen();
+        if (activeTab === 'stats' || activeTab === 'skills') renderStatScreen();
     }, 1600);
-    if (activeTab === 'stats') renderStatScreen();
+    if (activeTab === 'stats' || activeTab === 'skills') renderStatScreen();
 }
 
 function renderActiveTab() {
@@ -405,19 +423,16 @@ function renderUnlockBanner() {
     `;
 }
 
-function renderStatsTab() {
+// One upgradeable row: current value, base, bonus and the buy button. Shared by
+// the Stats and Skills tabs so a stat reads the same wherever it is bought.
+function renderUpgradeRow(stat, availablePoints) {
     const stats = upgradeSystem.getStats();
-    const availablePoints = upgradeSystem.getAvailablePoints();
+    const current = stats[stat.key];
+    const def = upgradeSystem.stats[stat.key];
+    const base = def.base;
+    const bonus = calculateBonus(stat.key, current, base);
 
-    let html = '<div class="stats-grid">';
-
-    STAT_ROWS.forEach((stat) => {
-        const current = stats[stat.key];
-        const def = upgradeSystem.stats[stat.key];
-        const base = def.base;
-        const bonus = calculateBonus(stat.key, current, base);
-
-        let formatText = current;
+    let formatText = current;
         if (stat.format === 'hpRegen') {
             formatText = `${current} HP/sec`;
         } else if (stat.format === 'moveSpeed') {
@@ -437,38 +452,45 @@ function renderStatsTab() {
         } else if (stat.format === 'echoCooldown') {
             formatText = `${current.toFixed(1)} sec`;
         } else if (stat.format === 'multishot') {
-            formatText = `${current} shot${current === 1 ? '' : 's'}`;
-        }
+        formatText = `${current} shot${current === 1 ? '' : 's'}`;
+    }
 
-        // A stat can cost more than one point, so the button has to compare the
-        // balance against this stat's cost rather than against zero.
-        const cost = upgradeSystem.statCost(stat.key);
-        // Capped stats (Critical Chance, Critical Damage, Echo Cooldown) cannot
-        // take another point, so say so instead of silently eating the click
-        const maxed = upgradeSystem.isMaxed(stat.key);
-        const isDisabled = maxed || availablePoints < cost;
-        // Tells the player what a single point is worth now, so percentage
-        // scaling stays readable instead of looking like a flat bonus.
-        const perPoint = def.percentPerPoint
-            ? `+${trim(def.percentPerPoint * 100)}%`
-            : `${trim(def.increment)}`;
-        const hint = maxed
-            ? 'Already maxed out, further points have no effect'
-            : `Per point: ${cost > 1 ? `${perPoint}, costs ${cost} points` : perPoint}`;
-        const bonusText = maxed ? 'Maxed' : `Bonus: ${bonus}`;
-        const plusText = maxed ? 'MAX' : (cost > 1 ? `+${cost}` : '+');
+    // A stat can cost more than one point, so the button has to compare the
+    // balance against this stat's cost rather than against zero.
+    const cost = upgradeSystem.statCost(stat.key);
+    // Capped stats (Critical Chance, Critical Damage, Echo Cooldown) cannot
+    // take another point, so say so instead of silently eating the click
+    const maxed = upgradeSystem.isMaxed(stat.key);
+    const isDisabled = maxed || availablePoints < cost;
+    // Tells the player what a single point is worth now, so percentage
+    // scaling stays readable instead of looking like a flat bonus.
+    const perPoint = def.percentPerPoint
+        ? `+${trim(def.percentPerPoint * 100)}%`
+        : `${trim(def.increment)}`;
+    const hint = maxed
+        ? 'Already maxed out, further points have no effect'
+        : `Per point: ${cost > 1 ? `${perPoint}, costs ${cost} points` : perPoint}`;
+    const bonusText = maxed ? 'Maxed' : `Bonus: ${bonus}`;
+    const plusText = maxed ? 'MAX' : (cost > 1 ? `+${cost}` : '+');
 
-        html += `
-            <div class="stat-row ${maxed ? 'maxed' : ''}">
-                <span class="stat-name">${stat.label}</span>
-                <span class="stat-value">${formatText}</span>
-                <span class="stat-base">Base: ${base}</span>
-                <span class="stat-bonus">${bonusText}</span>
-                <button class="stat-plus ${isDisabled ? 'disabled' : ''}" data-stat="${stat.key}" title="${hint}" ${isDisabled ? 'disabled' : ''}>${plusText}</button>
-            </div>
-        `;
+    return `
+        <div class="stat-row ${maxed ? 'maxed' : ''}">
+            <span class="stat-name">${stat.label}</span>
+            <span class="stat-value">${formatText}</span>
+            <span class="stat-base">Base: ${base}</span>
+            <span class="stat-bonus">${bonusText}</span>
+            <button class="stat-plus ${isDisabled ? 'disabled' : ''}" data-stat="${stat.key}" title="${hint}" ${isDisabled ? 'disabled' : ''}>${plusText}</button>
+        </div>
+    `;
+}
+
+function renderStatsTab() {
+    const availablePoints = upgradeSystem.getAvailablePoints();
+
+    let html = '<div class="stats-grid">';
+    STAT_ROWS.forEach((stat) => {
+        html += renderUpgradeRow(stat, availablePoints);
     });
-
     html += '</div>';
     return html;
 }
@@ -478,12 +500,14 @@ function renderStatsTab() {
 function renderPerksTab() {
     let html = `
         <div class="perks-intro">
-            Overcommit points into a single stat to unlock its perks.
+            Overcommit points into a single stat to unlock its perks. Echo Shift's
+            stats count toward its perks too, and are bought with Ability Points
+            on the Skills tab.
         </div>
         <div class="perks-grid">
     `;
 
-    for (const stat of STAT_ROWS) {
+    for (const stat of PERK_ROWS) {
         const bonus = perks.bonusPercent(stat.key);
         const next = perks.getNextLocked(stat.key);
         const progress = next ? Math.max(0, Math.min(1, bonus / next.threshold)) : 1;
@@ -513,20 +537,28 @@ function renderPerksTab() {
     return html;
 }
 
-// Skills tab. Echo Shift lives here so future skills have an obvious home; the
-// stats that drive it stay on the Stats tab.
+// Skills tab. Each skill owns its upgradeable stats, bought with ability
+// points, so adding a skill later means adding a card and a stat group here
+// without touching the character stat ladder.
 function renderSkillsTab() {
     const echo = game.echoShift;
+    const abilityPoints = upgradeSystem.getAvailableAbilityPoints();
     let status = 'Ready';
     if (echo && game.gameState && !game.gameState.isPaused) {
         const remaining = echo.lastUsed + echo.cooldown - game.getRunTime();
         if (remaining > 0) status = `Recharging (${remaining.toFixed(1)}s)`;
     }
 
+    let echoRows = '<div class="stats-grid skill-stats-grid">';
+    SKILL_STAT_ROWS.forEach((stat) => {
+        echoRows += renderUpgradeRow(stat, abilityPoints);
+    });
+    echoRows += '</div>';
+
     return `
         <div class="skills-intro">
-            Skills are triggered while you are playing. The stats that drive them
-            are on the Stats tab.
+            Skills are triggered while you are playing. Each skill is upgraded
+            with Ability Points, earned on every level up and spent only here.
         </div>
         <div class="skills-grid">
             <div class="skill-card">
@@ -541,11 +573,9 @@ function renderSkillsTab() {
                     against it keeps burning. The wall holds for the duration.
                 </p>
                 <div class="skill-stats">
-                    <span class="skill-stat">Power: ${player.echoPower.toFixed(2)}x</span>
-                    <span class="skill-stat">Duration: ${player.echoDuration.toFixed(1)}s</span>
-                    <span class="skill-stat">Cooldown: ${player.echoCooldown.toFixed(1)}s</span>
                     <span class="skill-stat">Status: ${status}</span>
                 </div>
+                ${echoRows}
             </div>
             <div class="skill-card locked">
                 <div class="skill-head">
