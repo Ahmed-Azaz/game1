@@ -226,6 +226,17 @@ let incoming = amount;
         incoming = Math.min(incoming, this.maxHP * JUGGERNAUT_CONTACT_CAP);
     }
 
+    // Aegis: half of every projectile hit while healthy. Gated on the same
+    // contact/ranged split as Juggernaut above so the two never overlap - a body
+    // costs the 15% cap, a projectile costs half. The HP gate is a hard cliff
+    // on purpose: under half HP you are on your own, which is what makes
+    // holding that line a thing to play around. It also means Aegis cannot
+    // rescue a swing it would have killed you from, so it is a damage soak
+    // rather than a second chance.
+    if (source !== 'contact' && perks.has('aegis') && this.hp > this.maxHP * AEGIS_HP_FLOOR) {
+        incoming *= 0.5;
+    }
+
         // Stonewall: the first lethal hit of a wave is survived
         if (this.hp - incoming <= 0 && perks.has('stonewall') && !this.stonewallUsed) {
             this.stonewallUsed = true;
@@ -408,6 +419,7 @@ const MOMENTUM_MAX_STACKS = 10;
 const MOMENTUM_WINDOW = 2;
 const REGEN_HOLD_OFF = 1.2;
 const JUGGERNAUT_CONTACT_CAP = 0.15; // a contact hit takes at most 15% of max HP
+const AEGIS_HP_FLOOR = 0.5; // Aegis only halves projectiles while above this share of max HP
 const JUGGERNAUT_THRESHOLD = 0.5; // only used by the commented-out immunity above
 const SECOND_WIND_PERIOD = 20;
 const SECOND_WIND_TRIGGER = 0.3;

@@ -27,10 +27,15 @@ export const PERK_STATS = [
 ];
 
 export const PERKS = [
-    // HP
-    { id: 'stonewall', stat: 'hp', tier: 1, threshold: 600, name: 'Stonewall',
+// HP
+    // Aegis leads the HP ladder on purpose: it costs about ten points against
+    // Stonewall's forty, so the first HP milestone arrives early and teaches
+    // the contact/projectile split that Juggernaut later formalises.
+    { id: 'aegis', stat: 'hp', tier: 1, threshold: 150, name: 'Aegis',
+      description: 'While you are above half HP, projectile damage is halved. Contact hits are not covered.' },
+    { id: 'stonewall', stat: 'hp', tier: 2, threshold: 600, name: 'Stonewall',
       description: 'A hit that would kill you leaves you at 1 HP instead. Once per wave.' },
-    { id: 'juggernaut', stat: 'hp', tier: 2, threshold: 2500, name: 'Juggernaut',
+    { id: 'juggernaut', stat: 'hp', tier: 3, threshold: 2500, name: 'Juggernaut',
       description: 'Contact hits can never take more than 15% of your max HP.' },
 
     // HP Regen
