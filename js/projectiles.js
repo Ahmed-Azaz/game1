@@ -16,6 +16,39 @@ let projectiles = [];
 let beams = [];
 let nextId = 1;
 
+// Hard ceiling on bolts alive at once. Every emitter on its own is tuned to be
+// reasonable, and the screen-filling problem was only ever the sum of them: a
+// crowd of drifters plus a phase-3 core could put well over a hundred up at
+// once. Capping at spawn makes on-screen density a deliberate property of the
+// game rather than an accident of how many enemies happened to be alive.
+//
+// Deliberate telegraphs are exempt and always spawn. The core beam and the
+// charger shockwave are the patterns the player is meant to read and answer, and
+// silently dropping one because the screen is busy would punish them for a fight
+// that is going badly.
+const MAX_LIVE_BOLTS = 64;
+
+function liveBoltCount() {
+    let n = 0;
+    for (let i = 0; i < projectiles.length; i++) {
+        if (projectiles[i].alive) n++;
+    }
+    return n;
+}
+
+// Makes room for a telegraph that must not be dropped: retires the oldest live
+// bolt. Oldest-first is the right victim, since it is the one closest to leaving
+// on its own anyway.
+function releaseOldest() {
+    let oldest = null;
+    for (let i = 0; i < projectiles.length; i++) {
+        const p = projectiles[i];
+        if (!p.alive) continue;
+        if (!oldest || p.id < oldest.id) oldest = p;
+    }
+    if (oldest) oldest.alive = false;
+}
+
 // Reuse dead slots: waves spawn these in bursts and the arena churns through
 // hundreds per run.
 function takeSlot() {
@@ -28,8 +61,14 @@ function takeSlot() {
 }
 
 // opts: x, y, angle, speed, damage, radius, life, color, size, homing (rad/s),
-//       pierce, blockedByEchoWall (default true), kind
+//       pierce, blockedByEchoWall (default true), kind, telegraph
 export function spawn(opts) {
+    // Telegraphs bypass the ceiling, see MAX_LIVE_BOLTS
+    if (opts.telegraph || opts.kind === 'shockwave') {
+        if (liveBoltCount() >= MAX_LIVE_BOLTS) releaseOldest(opts.kind === 'shockwave');
+    } else if (liveBoltCount() >= MAX_LIVE_BOLTS) {
+        return null;
+    }
     const p = takeSlot();
     p.id = nextId++;
     p.alive = true;

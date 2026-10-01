@@ -103,8 +103,11 @@ const ARENA_MARGIN = 50;
 // Drifter: the ring it tries to hold, and the speed it needs to match
 const DRIFTER_ORBIT_RADIUS = 110;
 const DRIFTER_ORBIT_SPEED = 1.1;
-// Waves before drifters start throwing bolts at all
-const DRIFTER_BOLT_WAVE = 6;
+// Waves before drifters start throwing bolts at all. Held back to 10 because a
+// drifter is the cheapest and most numerous enemy in the game: once it shoots,
+// the projectile count scales with population, and it did that from wave 6 when
+// the player had barely any movement tools yet.
+const DRIFTER_BOLT_WAVE = 10;
 
 // Charger: rush tuning. The direction is locked at windup START so the
 // telegraph on screen is the line it will actually take.
@@ -130,13 +133,21 @@ const WARDEN_SUMMON_EVERY = 10;
 const WARDEN_LANCE_EVERY = 6;
 const WARDEN_LANCE_CHARGE = 1.0;
 
-// Rift Core phase timings
+const HUNTER_BOLT_EVERY = 3.2;
+
+// Rift Core pattern timing.
+// The spiral used to tick every 0.18s, which is a permanent eleven shots a
+// second for the whole phase no matter how the fight was going. It is now a
+// burst of six on a slower cycle: same sense of a rotating barrage, about a
+// third of the sustained fire rate, and the gaps between bursts are long enough
+// to actually cross.
 const CORE_BURST_EVERY = 3.5;
 const CORE_ORB_EVERY = 4.0;
-const CORE_SPIRAL_EVERY = 0.18;
-
-// Echo Hunter fires into your Echo on purpose: the bolts exist to be erased
-const HUNTER_BOLT_EVERY = 3.2;
+const CORE_SPIRAL_EVERY = 0.55;
+const CORE_SPIRAL_COUNT = 6;
+// Core orbs homed for 5s, which left slow, spent bolts drifting around the arena
+// long after they could matter. They now expire sooner and let the pool drain.
+const CORE_ORB_LIFE = 3.2;
 
 // Wave scaling: without this, waves only add bodies and the game plateaus once
 // the player has a few attack-power points.
@@ -791,7 +802,10 @@ function updateRiftCoreBoss(enemy, deltaTime, nx, ny, distance) {
 
     // Phase 2 and up: homing orbs and a sweeping beam
     if (phase >= 2) {
-        if (enemy.orbTimer === undefined) enemy.orbTimer = CORE_ORB_EVERY;
+        // The three timers start at different points in their own cycles. They
+        // used to all reset to the same round number on the same frame, so the
+        // radial, the orbs and the beam frequently landed as one pile.
+        if (enemy.orbTimer === undefined) enemy.orbTimer = CORE_ORB_EVERY * 0.6;
         enemy.orbTimer -= deltaTime;
         if (enemy.orbTimer <= 0) {
             enemy.orbTimer = CORE_ORB_EVERY;
@@ -803,14 +817,14 @@ function updateRiftCoreBoss(enemy, deltaTime, nx, ny, distance) {
                     speed: 80,
                     damage: enemy.damage * 0.35,
                     radius: 7,
-                    life: 5,
+                    life: CORE_ORB_LIFE,
                     homing: 1.2,
                     color: '#ffb347',
                     size: 8
                 });
             }
         }
-        if (enemy.beamTimer === undefined) enemy.beamTimer = CORE_BURST_EVERY;
+        if (enemy.beamTimer === undefined) enemy.beamTimer = CORE_BURST_EVERY * 1.7;
         enemy.beamTimer -= deltaTime;
         if (enemy.beamTimer <= 0) {
             enemy.beamTimer = phase === 3 ? 4.5 : 7;
@@ -836,11 +850,14 @@ function updateRiftCoreBoss(enemy, deltaTime, nx, ny, distance) {
         enemy.spiralAngle += 2.2 * deltaTime;
         if (enemy.spiralTimer <= 0) {
             enemy.spiralTimer = CORE_SPIRAL_EVERY;
-            for (let i = 0; i < 2; i++) {
+            // Six spread across the turn rather than two opposite pairs, so a
+            // burst reads as a sweep you step around instead of a line you wait
+            // out
+            for (let i = 0; i < CORE_SPIRAL_COUNT; i++) {
                 projectiles.spawn({
                     x: enemy.x,
                     y: enemy.y,
-                    angle: enemy.spiralAngle + i * Math.PI,
+                    angle: enemy.spiralAngle + (i / CORE_SPIRAL_COUNT) * Math.PI * 2,
                     speed: 130,
                     damage: enemy.damage * 0.25,
                     radius: 6,
