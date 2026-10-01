@@ -222,7 +222,60 @@ export function resetAll() {
     enemyIdCounter = 0;
 }
 
+// Separation used to test every enemy against every other one, so a late wave of
+// 150 bodies spent ~22k distance checks per frame on the main thread. That is
+// CPU rather than GPU cost, but on a phone it starves the frame the renderer is
+// trying to draw, which reads to the player as lag anyway.
+//
+// A uniform grid fixes it without changing a single push: the cell is as wide
+// as the widest separation distance (2x the largest enemy size), so any body
+// close enough to matter is always inside the 3x3 block of cells around it.
+const MAX_ENEMY_SIZE = Math.max(...Object.values(enemyTemplates).map((t) => t.size));
+const SEPARATION_CELL = MAX_ENEMY_SIZE * 2;
+const separationBuckets = new Map();
+const bucketPool = [];
+let liveBuckets = [];
+
+// String keys here cost more than the math they save, so cells are keyed by a
+// single integer: x and y are packed into one number far wider than the arena.
+// Two different cells colliding would only ever add a far-away body to a query,
+// and the exact distance test below discards it, so the pack stays safe.
+function cellKey(cx, cy) {
+    return cx * 4096 + cy;
+}
+
+function rebuildSeparationGrid() {
+    // Buckets are pooled rather than reallocated. A late wave asks for ~200 of
+    // them every frame, and 200 short-lived arrays at 60fps is 12k allocations a
+    // second for the collector to chase, which showed up as periodic hitches on
+    // a phone exactly like the problem being fixed.
+    for (let i = 0; i < liveBuckets.length; i++) {
+        liveBuckets[i].length = 0;
+        bucketPool.push(liveBuckets[i]);
+    }
+    liveBuckets = [];
+    separationBuckets.clear();
+
+    for (const enemy of activeEnemies) {
+        if (enemy.hp <= 0) continue;
+        const key = cellKey(
+            Math.floor(enemy.x / SEPARATION_CELL),
+            Math.floor(enemy.y / SEPARATION_CELL)
+        );
+        let bucket = separationBuckets.get(key);
+        if (bucket === undefined) {
+            bucket = bucketPool.pop();
+            if (bucket === undefined) bucket = [];
+            separationBuckets.set(key, bucket);
+            liveBuckets.push(bucket);
+        }
+        bucket.push(enemy);
+    }
+}
+
 export function updateAll(deltaTime) {
+    rebuildSeparationGrid();
+
     // Update all active enemies
     for (let i = activeEnemies.length - 1; i >= 0; i--) {
         const enemy = activeEnemies[i];
@@ -321,22 +374,33 @@ export function updateAll(deltaTime) {
     }
 }
 
-// Push apart from anything too close, weighted by how much the bodies overlap
+// Push apart from anything too close, weighted by how much the bodies overlap.
+// Only the 3x3 block of cells around this body can hold a neighbour close enough
+// to matter, so the loop walks that block instead of the whole roster. The
+// distance test below is still the authority on what actually pushes.
 function applySeparation(enemy) {
     let pushX = 0;
     let pushY = 0;
-    for (let i = 0; i < activeEnemies.length; i++) {
-        const other = activeEnemies[i];
-        if (other === enemy || other.hp <= 0) continue;
-        const dx = enemy.x - other.x;
-        const dy = enemy.y - other.y;
-        const minDist = enemy.size + other.size;
-        const distSq = dx * dx + dy * dy;
-        if (distSq >= minDist * minDist || distSq < 0.0001) continue;
-        const dist = Math.sqrt(distSq);
-        const overlap = (minDist - dist) / minDist;
-        pushX += (dx / dist) * overlap;
-        pushY += (dy / dist) * overlap;
+    const cx = Math.floor(enemy.x / SEPARATION_CELL);
+    const cy = Math.floor(enemy.y / SEPARATION_CELL);
+    for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+            const bucket = separationBuckets.get(cellKey(cx + ox, cy + oy));
+            if (bucket === undefined) continue;
+            for (let i = 0; i < bucket.length; i++) {
+                const other = bucket[i];
+                if (other === enemy || other.hp <= 0) continue;
+                const dx = enemy.x - other.x;
+                const dy = enemy.y - other.y;
+                const minDist = enemy.size + other.size;
+                const distSq = dx * dx + dy * dy;
+                if (distSq >= minDist * minDist || distSq < 0.0001) continue;
+                const dist = Math.sqrt(distSq);
+                const overlap = (minDist - dist) / minDist;
+                pushX += (dx / dist) * overlap;
+                pushY += (dy / dist) * overlap;
+            }
+        }
     }
     if (pushX === 0 && pushY === 0) return;
     const force = SEPARATION_FORCE * enemy.baseSpeed;

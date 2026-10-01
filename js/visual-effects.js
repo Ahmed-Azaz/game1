@@ -1,17 +1,16 @@
+import * as quality from './render-quality.js';
+
 const particles = [];
 const damageLabels = [];
 const bursts = [];
-let particleLimit = 240;
 let screenShakeEnabled = true;
 let screenShakeUntil = 0;
 let screenShakeStart = 0;
 let screenShakeDuration = 0.12;
 let screenShakeIntensity = 0;
 
-export function setParticleQuality(quality) {
-    if (quality === 'low') particleLimit = 120;
-    else if (quality === 'high') particleLimit = 320;
-    else particleLimit = 240;
+export function setParticleQuality(level) {
+    quality.setSetting(level);
 }
 
 export function setScreenShakeEnabled(enabled) {
@@ -45,7 +44,8 @@ export function spawnHit(x, y, color, amount, critical = false) {
 
 export function spawnBurst(x, y, color, count = 12) {
     const now = performance.now() / 1000;
-    for (let i = 0; i < count && particles.length < particleLimit; i++) {
+    const limit = quality.particles();
+    for (let i = 0; i < count && particles.length < limit; i++) {
         const angle = Math.random() * Math.PI * 2;
         const speed = 35 + Math.random() * 90;
         particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, color, born: now, life: .25 + Math.random() * .35, size: 1.5 + Math.random() * 2.2 });
@@ -87,7 +87,12 @@ export function render(ctx, now = performance.now() / 1000) {
     }
     ctx.textAlign = 'center';
     ctx.font = '600 13px Segoe UI, sans-serif';
-    for (const label of damageLabels) {
+    // Labels are drawn newest-last, so trimming from the front drops the ones
+    // already faded rather than the ones the player is still reading
+    const cap = quality.damageLabels();
+    const skip = damageLabels.length > cap ? damageLabels.length - cap : 0;
+    for (let i = skip; i < damageLabels.length; i++) {
+        const label = damageLabels[i];
         const age = (now - label.born) / label.life;
         ctx.globalAlpha = Math.max(0, 1 - age);
         ctx.fillStyle = label.color;

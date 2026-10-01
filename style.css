@@ -648,7 +648,10 @@ body {
 /* Echo Rift visual pass: an original, glassy instrument-panel language. */
 :root { --bg-primary:#080b19; --bg-secondary:#11152b; --accent-purple:#b69aff; --accent-cyan:#69efff; --accent-orange:#ff987c; --text-primary:#e7f3ff; --text-secondary:#91a2bd; }
 #game-container { background:radial-gradient(ellipse at 50% 46%,rgba(42,54,105,.2),transparent 68%),#080b19; }
-#game-canvas { filter:saturate(1.12); }
+/* The old saturate() filter here was a full-canvas composite pass on every
+   frame the canvas changed, which on a phone GPU costs more than the entire
+   scene it was tinting. The saturation it added is now baked into the palette
+   colours in js/main.js, so nothing is lost and the compositor stays idle. */
 #hud { top:22px;left:24px;gap:7px;text-shadow:0 0 14px rgba(85,206,255,.4); }
 #level-display { font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#d7ecff; }
 #xp-bar-container { width:210px;height:5px;background:rgba(110,146,191,.2);border:1px solid rgba(131,182,226,.28);border-radius:99px;box-shadow:0 0 18px rgba(86,121,255,.12); }

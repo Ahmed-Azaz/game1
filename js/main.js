@@ -9,6 +9,7 @@ import { initAudioContext } from './audio.js';
 import * as visualEffects from './visual-effects.js';
 import * as fragments from './fragments.js';
 import { crazyGames } from './crazygames.js';
+import * as quality from './render-quality.js';
 
 // Game state
 let gameState = 'title'; // title, onboarding, playing, paused, game-over
@@ -86,8 +87,13 @@ function syncStateFromDOM() {
 // Game loop
 function gameLoop(timestamp) {
     deltaTime = Math.min(Math.max((timestamp - lastTimestamp) / 1000, 0), 0.1); // seconds, clamped
+    const frameMs = timestamp - lastTimestamp;
     lastTimestamp = timestamp;
-    
+
+    // Feeds the render quality budget. Sampled from the raw frame cost rather
+    // than the clamped deltaTime, so a long stall is visible to it.
+    quality.sampleFrame(frameMs);
+
     syncStateFromDOM();
     
     // Update game systems
@@ -111,6 +117,19 @@ function gameLoop(timestamp) {
     requestAnimationFrame(gameLoop);
 }
 
+// Gradient objects are expensive to build and are resolved against the transform
+// in force when they are filled, not when they are created, so this one is built
+// once at module scope and reused under the per-frame translate/scale.
+let playerAuraGradient = null;
+function getPlayerAuraGradient(ctx) {
+    if (!playerAuraGradient) {
+        playerAuraGradient = ctx.createRadialGradient(0, 0, 2, 0, 0, 36);
+        playerAuraGradient.addColorStop(0, 'rgba(56,155,170,.22)');
+        playerAuraGradient.addColorStop(1, 'rgba(71,205,220,0)');
+    }
+    return playerAuraGradient;
+}
+
 // Original procedural neon arena renderer.
 function render() {
     const canvas = document.getElementById('game-canvas');
@@ -118,13 +137,19 @@ function render() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // The arena never changes, so its gradients and grid are painted once into an
+    // offscreen buffer and blitted after that. Building them every frame was two
+    // gradient allocations plus ~60 strokes for an image that never varies.
     const t = performance.now() / 1000;
     const enemies = getActiveEnemies();
     const shake = visualEffects.getScreenShakeOffset(t);
 
     ctx.save();
+    // The shake still covers the arena, so the cached backdrop is drawn inside
+    // the same transform as everything else rather than pinned to the canvas
     ctx.translate(shake.x, shake.y);
-    drawArena(ctx, canvas.width, canvas.height, t);
+    drawArenaBackdrop(ctx, canvas.width, canvas.height);
+    drawArenaMotes(ctx, canvas.width, canvas.height, t);
     drawEchoTrail(ctx, t);
     for (const enemy of enemies) drawEnemy(ctx, enemy, t);
     drawEnemyTelegraphs(ctx, enemies, t);
@@ -143,7 +168,32 @@ function render() {
     ctx.restore();
 }
 
-function drawArena(ctx, w, h, t) {
+// Cached arena art: gradient backdrop, centre glow, floor grid and the corner
+// brackets. Rebuilt only when the canvas size changes.
+let arenaCache = null;
+let arenaCacheKey = '';
+
+function drawArenaBackdrop(ctx, w, h) {
+    const key = `${w}x${h}`;
+    if (!arenaCache || arenaCacheKey !== key) {
+        arenaCache = buildArenaCache(w, h);
+        arenaCacheKey = key;
+    }
+    ctx.drawImage(arenaCache, 0, 0);
+}
+
+function buildArenaCache(w, h) {
+    // document.createElement gives an offscreen canvas that is never in the DOM,
+    // so nothing here can be seen directly
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d');
+    paintArena(g, w, h);
+    return c;
+}
+
+function paintArena(ctx, w, h) {
     const ax = 38, ay = 34, aw = w - 76, ah = h - 68;
 
     const backdrop = ctx.createLinearGradient(0, 0, w, h);
@@ -158,11 +208,6 @@ function drawArena(ctx, w, h, t) {
     glow.addColorStop(1, 'rgba(5,7,18,0)');
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, w, h);
-
-    for (let i = 0; i < 82; i++) {
-        ctx.fillStyle = `rgba(164,197,255,${.2 + (Math.sin(t * 1.5 + i * 8) + 1) * .18})`;
-        ctx.fillRect(i * 137.51 % w, i * 79.17 % h, i % 9 === 0 ? 2 : 1, i % 9 === 0 ? 2 : 1);
-    }
 
     ctx.save();
     ctx.beginPath();
@@ -187,6 +232,16 @@ function drawArena(ctx, w, h, t) {
     }
 }
 
+// The twinkling dust motes are the only part of the arena that animates, so
+// they are drawn live over the cached backdrop rather than baked in
+function drawArenaMotes(ctx, w, h, t) {
+    const count = quality.stars();
+    for (let i = 0; i < count; i++) {
+        ctx.fillStyle = `rgba(164,197,255,${.2 + (Math.sin(t * 1.5 + i * 8) + 1) * .18})`;
+        ctx.fillRect(i * 137.51 % w, i * 79.17 % h, i % 9 === 0 ? 2 : 1, i % 9 === 0 ? 2 : 1);
+    }
+}
+
 // Only the swept part of the frozen path is drawn, so the player can read the
 // damage front as it travels.
 function drawEchoTrail(ctx, t) {
@@ -205,12 +260,13 @@ function drawEchoTrail(ctx, t) {
     for (let i = 1; i <= idx; i++) ctx.lineTo(path[i].x, path[i].y);
     if (echoShift.headX !== undefined) ctx.lineTo(echoShift.headX, echoShift.headY);
 
+    const glow = quality.importantGlow();
     ctx.shadowColor = '#36eaff';
-    ctx.shadowBlur = standing ? 18 : 14;
+    ctx.shadowBlur = glow ? (standing ? 18 : 14) : 0;
     ctx.strokeStyle = `rgba(31,221,255,${0.24 * pulse})`;
     ctx.lineWidth = standing ? 20 : 15;
     ctx.stroke();
-    ctx.shadowBlur = 6;
+    ctx.shadowBlur = glow ? 6 : 0;
     ctx.strokeStyle = `rgba(79,222,235,${0.76 * pulse})`;
     ctx.lineWidth = standing ? 4 : 3;
     ctx.stroke();
@@ -221,7 +277,7 @@ function drawEchoTrail(ctx, t) {
 
     ctx.fillStyle = '#b8ffff';
     ctx.shadowColor = '#36eaff';
-    ctx.shadowBlur = 16;
+    ctx.shadowBlur = glow ? 16 : 0;
     ctx.beginPath();
     ctx.arc(echoShift.headX ?? path[0].x, echoShift.headY ?? path[0].y, standing ? 3 : 5, 0, Math.PI * 2);
     ctx.fill();
@@ -237,7 +293,13 @@ function drawEnemy(ctx, e, t) {
     ctx.translate(e.x, e.y);
     ctx.rotate(t * (e.type === 'charger' ? 1.2 : .25) + e.id);
     ctx.shadowColor = e.color;
-    ctx.shadowBlur = windingUp ? 20 : (e.type === 'rift_warden' ? 14 : 8);
+    // Blur is the single most expensive thing in this file and it was being paid
+    // once per enemy per frame, so with a late-wave crowd it dominated the whole
+    // cost. Off entirely below high: the body already reads from its fill and
+    // outline, and the windup tell keeps a flat bright outline instead.
+    const entityGlow = quality.entityGlow();
+    ctx.shadowBlur = entityGlow ? (windingUp ? 20 : (e.type === 'rift_warden' ? 14 : 8)) : 0;
+    if (!entityGlow && windingUp) ctx.shadowColor = '#fff3d6';
     ctx.fillStyle = `${e.color}30`;
     ctx.strokeStyle = windingUp ? '#fff3d6' : e.color;
     ctx.lineWidth = windingUp ? 3 : 2;
@@ -280,8 +342,10 @@ function drawEnemy(ctx, e, t) {
         ctx.strokeStyle = '#7dd7ef';
         ctx.lineWidth = 2;
         ctx.globalAlpha = .55 + Math.sin(t * 6) * .25;
-        ctx.shadowColor = '#7dd7ef';
-        ctx.shadowBlur = 10;
+        if (quality.entityGlow()) {
+            ctx.shadowColor = '#7dd7ef';
+            ctx.shadowBlur = 10;
+        }
         ctx.beginPath();
         ctx.arc(e.x, e.y, r * 1.28, 0, Math.PI * 2);
         ctx.stroke();
@@ -293,11 +357,12 @@ function drawEnemy(ctx, e, t) {
 // is a promise the AI already made: the line a charger locked in, the lance a
 // warden is charging, the well a beast is pulling with.
 function drawEnemyTelegraphs(ctx, enemies, t) {
+    const showTelegraphs = quality.telegraphs();
     for (const e of enemies) {
         if (e.hp <= 0) continue;
 
         // Null Beast gravity well
-        if (e.type === 'null_beast') {
+        if (e.type === 'null_beast' && showTelegraphs) {
             ctx.save();
             ctx.strokeStyle = 'rgba(80,227,194,.18)';
             ctx.setLineDash([4, 10]);
@@ -351,24 +416,32 @@ function drawEnemyTelegraphs(ctx, enemies, t) {
 }
 
 function drawPlayerAura(ctx, t) {
+    // The attack range grows to 300px, so this fill covers a large slice of the
+    // screen every frame. Kept at every level because it is the only readout of
+    // where the player can actually hit, but the dashed rings on top of it are
+    // decoration and go first.
     ctx.save();
     ctx.beginPath();
     ctx.arc(player.x, player.y, player.attackRange, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(143,126,255,.035)';
     ctx.fill();
-    ctx.setLineDash([7, 7]);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(178,157,220,.42)';
-    ctx.shadowColor = '#a98aff';
-    ctx.shadowBlur = 6;
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(225,213,255,.25)';
-    ctx.beginPath();
-    ctx.arc(player.x, player.y, player.attackRange - 4, 0, Math.PI * 2);
-    ctx.stroke();
+    if (quality.auraRings()) {
+        ctx.setLineDash([7, 7]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(178,157,220,.42)';
+        if (quality.importantGlow()) {
+            ctx.shadowColor = '#a98aff';
+            ctx.shadowBlur = 6;
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(225,213,255,.25)';
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, player.attackRange - 4, 0, Math.PI * 2);
+        ctx.stroke();
+    }
     ctx.restore();
 }
 
@@ -383,8 +456,10 @@ function drawAttackLine(ctx, enemies, t) {
 
     ctx.save();
     ctx.globalAlpha = 1 - (t - player.lastAttackTime) / .13;
-    ctx.shadowColor = '#81f7ff';
-    ctx.shadowBlur = 18;
+    if (quality.importantGlow()) {
+        ctx.shadowColor = '#81f7ff';
+        ctx.shadowBlur = 18;
+    }
     ctx.strokeStyle = '#acffff';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -398,15 +473,12 @@ function drawPlayer(ctx, t) {
     ctx.save();
     ctx.translate(player.x, player.y + Math.sin(t * 4));
 
-// Drawn at half scale to match the halved hitbox and the enemies. Scaling the
-// whole body rather than restating each number keeps the silhouette honest: the
-// ring, the orbits and the hull all stay in proportion to player.radius.
-ctx.scale(0.5, 0.5);
+    // Drawn at half scale to match the halved hitbox and the enemies. Scaling the
+    // whole body rather than restating each number keeps the silhouette honest: the
+    // ring, the orbits and the hull all stay in proportion to player.radius.
+    ctx.scale(0.5, 0.5);
 
-const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, 36);
-    aura.addColorStop(0, 'rgba(56,155,170,.22)');
-    aura.addColorStop(1, 'rgba(71,205,220,0)');
-    ctx.fillStyle = aura;
+    ctx.fillStyle = getPlayerAuraGradient(ctx);
     ctx.beginPath();
     ctx.arc(0, 0, 36, 0, Math.PI * 2);
     ctx.fill();
@@ -428,7 +500,7 @@ const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, 36);
         ctx.globalAlpha = 0.55;
     }
     ctx.shadowColor = '#34c4d2';
-    ctx.shadowBlur = 6;
+    ctx.shadowBlur = quality.importantGlow() ? 6 : 0;
     ctx.fillStyle = '#31aebb';
     ctx.strokeStyle = '#8ec6ca';
     ctx.lineWidth = 1.5;

@@ -9,6 +9,7 @@ import { player } from './player.js';
 import * as game from './game.js';
 import * as audio from './audio.js';
 import { spawnBurst } from './visual-effects.js';
+import * as quality from './render-quality.js';
 
 const ARENA_MARGIN = 30;
 
@@ -266,8 +267,13 @@ export function render(ctx, t) {
 
         ctx.save();
         ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 12;
+        // One blurred draw per projectile is the most expensive thing on screen
+        // during a dense wave, and the cap already allows 64 of them at once.
+        // Below high the streak and the filled head carry the motion on their own.
+        if (quality.entityGlow()) {
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 12;
+        }
         // Streak along the travel direction so slow shots still read as moving
         const tail = p.speed * 0.03;
         ctx.beginPath();
@@ -296,8 +302,12 @@ export function render(ctx, t) {
         } else {
             ctx.globalAlpha = 0.85;
             ctx.lineWidth = beam.width;
-            ctx.shadowColor = beam.color;
-            ctx.shadowBlur = 18;
+            // A live beam is a single long stroke, so its blur is worth keeping:
+            // it is the tell the player dodges against
+            if (quality.importantGlow()) {
+                ctx.shadowColor = beam.color;
+                ctx.shadowBlur = 18;
+            }
         }
         const ex = beam.x + Math.cos(beam.angle) * beam.length;
         const ey = beam.y + Math.sin(beam.angle) * beam.length;

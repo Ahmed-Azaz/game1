@@ -8,6 +8,7 @@ import * as audio from './audio.js';
 import { crazyGames } from './crazygames.js';
 import { saveSystem } from './save.js';
 import { clear as clearVisualEffects, spawnHit, setParticleQuality, setScreenShakeEnabled } from './visual-effects.js';
+import * as quality from './render-quality.js';
 import * as fragments from './fragments.js';
 
 // Shared mutable state (read by ui.js/enemies.js/player.js via namespace import)
@@ -24,8 +25,10 @@ export function initGame() {
         canvasHeight = canvas.height;
     }
     
-    // Game settings
+    // Game settings. Render quality is applied before anything else, because it
+    // is the one setting that changes how the very first frame is drawn.
     const settings = loadGameSettings();
+    if (settings.particleQuality) setParticleQuality(settings.particleQuality);
     applyGameSettings(settings);
     
     // Initial game state
@@ -565,7 +568,14 @@ export function isMarked(enemy, now = performance.now() / 1000) {
 export function loadGameSettings() {
     return saveSystem.saveData?.settings
         ? { ...saveSystem.saveData.settings }
-        : { masterVolume: 0.7, sfxVolume: 0.7, particleQuality: 'medium', screenShake: true };
+        : {
+            masterVolume: 0.7,
+            sfxVolume: 0.7,
+            // A phone gets the cheapest tier unless the player picks otherwise:
+            // this is the one default worth choosing for them
+            particleQuality: quality.defaultSetting(),
+            screenShake: true
+        };
 }
 
 export function saveGameSettings(settings) {
@@ -579,9 +589,6 @@ export function applyGameSettings(settings) {
     }
     if (settings.sfxVolume !== undefined) {
         audio.setSFXVolume(settings.sfxVolume);
-    }
-    if (settings.particleQuality) {
-        setParticleQuality(settings.particleQuality);
     }
     if (settings.screenShake !== undefined) {
         setScreenShakeEnabled(settings.screenShake);
@@ -674,6 +681,9 @@ export function restartRun() {
     spawnTimer = 0;
     pendingSpawns = 0;
     clearVisualEffects();
+    // A new run starts at the player's chosen quality, not at whatever the
+    // previous run's frame times left it at
+    quality.resetAdaptive();
     fragments.resetAll();
     projectiles.reset();
     bossWaveActive = false;
