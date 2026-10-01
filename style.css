@@ -717,7 +717,8 @@ body {
 #touch-echo-btn {
     position: absolute;
     bottom: 40px;
-    right: 40px;
+    left: 40px;
+    right: auto;
     width: 80px;
     height: 80px;
     background: rgba(182, 154, 255, 0.2);
@@ -769,18 +770,25 @@ body {
 #settings-panel .setting-row { display: grid; grid-template-columns: 1fr 1.2fr; gap: 14px; align-items: center; margin: 18px 0; }
 #settings-panel input[type="range"] { width: 100%; accent-color: #69efff; }
 #settings-panel button { margin-top: 12px; padding: 10px 20px; cursor: pointer; }
+/* Default layout is movement on the right thumb and SHIFT on the left, which is
+   the side most players pick up the phone with. The swapped class below flips it
+   for anyone holding the other way. */
 #joystick-area {
+    position: absolute;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    right: max(14px, env(safe-area-inset-right));
+    left: auto;
     width: clamp(78px, 13.5vw, 100px);
     height: clamp(78px, 13.5vw, 100px);
-    bottom: max(14px, env(safe-area-inset-bottom));
-    left: max(14px, env(safe-area-inset-left));
+    pointer-events: auto;
 }
 #touch-echo-btn {
     width: clamp(52px, 9.5vw, 62px);
     height: clamp(52px, 9.5vw, 62px);
     line-height: clamp(50px, 9vw, 60px);
     bottom: max(16px, env(safe-area-inset-bottom));
-    right: max(16px, env(safe-area-inset-right));
+    left: max(16px, env(safe-area-inset-left));
+    right: auto;
     font-size: 11px;
 }
 
@@ -794,16 +802,15 @@ body {
     margin-left: -21%;
 }
 
-/* Left-handed layout: movement on the right thumb, Shift on the left. These
-   override the offsets above, so the swap is a class flip rather than a second
-   set of rules to keep in step. */
-#touch-controls.mirrored #joystick-area {
-    left: auto;
-    right: max(14px, env(safe-area-inset-right));
-}
-#touch-controls.mirrored #touch-echo-btn {
+/* Swapped layout: movement on the left thumb, SHIFT on the right. Only the side
+   changes, so these offsets stay in step with the default rules above. */
+#touch-controls.swapped #joystick-area {
     right: auto;
-    left: max(16px, env(safe-area-inset-left));
+    left: max(14px, env(safe-area-inset-left));
+}
+#touch-controls.swapped #touch-echo-btn {
+    left: auto;
+    right: max(16px, env(safe-area-inset-right));
 }
 
 /* Title card */

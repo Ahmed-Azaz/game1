@@ -13,8 +13,9 @@ export const saveSystem = {
             sfxVolume: 0.7,
             particleQuality: 'medium',
             screenShake: true,
-            // Left-handed layout: movement on the right thumb, Shift on the left
-            reverseTouchControls: false
+            // Off is the default layout: movement on the right thumb, SHIFT on the
+            // left. On moves the joystick to the left and SHIFT to the right.
+            swapTouchSides: false
         },
         onboardingCompleted: false
     },
@@ -99,10 +100,10 @@ function uiSettingsApply(settings) {
     if (settings.screenShake !== undefined) {
         import('./visual-effects.js').then((fx) => fx.setScreenShakeEnabled(settings.screenShake));
     }
-    if (settings.reverseTouchControls !== undefined) {
+    if (settings.swapTouchSides !== undefined) {
         // The layout is a class on the touch overlay, so it applies directly
         // rather than through a module that has to be imported first
-        document.getElementById('touch-controls')?.classList.toggle('mirrored', !!settings.reverseTouchControls);
+        document.getElementById('touch-controls')?.classList.toggle('swapped', !!settings.swapTouchSides);
     }
 }
 

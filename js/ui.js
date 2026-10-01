@@ -221,7 +221,7 @@ function setUpEventListeners() {
     }
     const particleQuality = document.getElementById('particle-quality');
     const screenShake = document.getElementById('screen-shake');
-    const reverseTouch = document.getElementById('reverse-touch-controls');
+    const swapTouch = document.getElementById('swap-touch-sides');
     const settings = game.loadGameSettings();
     if (particleQuality) {
         particleQuality.value = settings.particleQuality || 'medium';
@@ -237,10 +237,11 @@ function setUpEventListeners() {
             game.applyGameSettings(game.loadGameSettings());
         });
     }
-    if (reverseTouch) {
-        reverseTouch.checked = settings.reverseTouchControls === true;
-        reverseTouch.addEventListener('change', (e) => {
-            persistGameSettings({ reverseTouchControls: e.target.checked });
+    // Unchecked is the default layout, so only an explicit true opts into swapping
+    if (swapTouch) {
+        swapTouch.checked = settings.swapTouchSides === true;
+        swapTouch.addEventListener('change', (e) => {
+            persistGameSettings({ swapTouchSides: e.target.checked });
             game.applyGameSettings(game.loadGameSettings());
         });
     }
