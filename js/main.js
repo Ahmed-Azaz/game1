@@ -125,11 +125,14 @@ function render() {
     ctx.save();
     ctx.translate(shake.x, shake.y);
     drawArena(ctx, canvas.width, canvas.height, t);
-    fragments.render(ctx, t);
     drawEchoTrail(ctx, t);
     for (const enemy of enemies) drawEnemy(ctx, enemy, t);
     drawEnemyTelegraphs(ctx, enemies, t);
     projectiles.render(ctx, t);
+    // XP draws over the projectile layer on purpose: a collectible hidden behind
+    // a bolt reads as gone, and losing an orb to a spawn happens constantly in
+    // the dense late waves.
+    fragments.render(ctx, t);
     drawPlayerAura(ctx, t);
     drawAttackLine(ctx, enemies, t);
     drawPlayer(ctx, t);
