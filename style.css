@@ -822,9 +822,9 @@ body {
 }
 
 /* Swapped layout puts the fire button on the right, so the rail follows it.
-   #hud carries the same flag as #touch-controls, since the rail is not a
-   descendant of the touch overlay and cannot inherit its class. */
-#hud.swapped #skill-rail {
+   The rail is a sibling of #hud inside #ui-overlay, not a descendant of the
+   touch overlay, so the flag is put on #ui-overlay and keyed off that. */
+#ui-overlay.swapped #skill-rail {
     left: auto;
     right: 10px;
 }
@@ -917,7 +917,7 @@ body {
         gap: 5px;
     }
 
-    #hud.swapped #skill-rail {
+    #ui-overlay.swapped #skill-rail {
         left: auto;
         right: 6px;
     }

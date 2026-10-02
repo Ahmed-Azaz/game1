@@ -1112,9 +1112,10 @@ export function applyTouchLayout(swapped) {
     if (!controls) return;
     controls.classList.toggle('swapped', !!swapped);
     // The skill rail sits beside the fire button, so it has to follow the button
-    // across when the sides swap. It lives in the HUD, not the touch overlay, so
-    // it cannot pick the class up from #touch-controls on its own.
-    document.getElementById('hud')?.classList.toggle('swapped', !!swapped);
+    // across when the sides swap. It is a sibling of #hud inside #ui-overlay
+    // rather than a descendant of the touch overlay, so it cannot pick the class
+    // up from #touch-controls and needs the flag put on #ui-overlay directly.
+    document.getElementById('ui-overlay')?.classList.toggle('swapped', !!swapped);
 }
 
 export function applyGameSettings(settings) {

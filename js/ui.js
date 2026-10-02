@@ -678,10 +678,28 @@ function buildSkillRail() {
         `;
     }).join('');
 
-    // One delegated listener, so it survives any later innerHTML changes
-    rail.addEventListener('click', (e) => {
+    // One delegated pair of listeners, so they survive any later innerHTML changes.
+    //
+    // It binds pointerdown rather than click, which is what every other touch
+    // control here uses. A click is not delivered until touchend, and while the
+    // joystick is holding a captured pointer the browser is free to cancel that
+    // synthesis, so a tap on a chip made with the other thumb while moving just
+    // vanished. Pointerdown fires the instant the finger lands, which is also
+    // what the player wants mid-fight: the switch should happen on contact, not
+    // when they lift off.
+    //
+    // pointerdown already covers mouse, touch and pen, so the click listener is
+    // there only for keyboard activation. That is the one path with no pointer
+    // event behind it, and it is the one case that reports detail === 0: a
+    // synthesized click from a tap or a mouse carries a click count instead, so
+    // it is ignored here and cannot double-switch.
+    const choose = (e) => {
         const chip = e.target.closest && e.target.closest('.skill-chip');
         if (chip && chip.dataset.skill) selectSkill(chip.dataset.skill);
+    };
+    rail.addEventListener('pointerdown', choose);
+    rail.addEventListener('click', (e) => {
+        if (e.detail === 0) choose(e);
     });
 
     syncSkillRail();
