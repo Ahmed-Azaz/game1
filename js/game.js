@@ -7,7 +7,7 @@ import { perks } from './perks.js';
 import * as audio from './audio.js';
 import { crazyGames } from './crazygames.js';
 import { saveSystem } from './save.js';
-import { clear as clearVisualEffects, spawnHit, setParticleQuality, setScreenShakeEnabled, spawnBurst, triggerScreenShake } from './visual-effects.js';
+import { clear as clearVisualEffects, spawnHit, setParticleQuality, setScreenShakeEnabled, spawnBurst, spawnShockRing, triggerScreenShake } from './visual-effects.js';
 import * as quality from './render-quality.js';
 import * as fragments from './fragments.js';
 import { SKILLS, SKILL_ORDER, skillRegistry } from './skills.js';
@@ -282,12 +282,20 @@ const dash = {
     // Charge accumulates while the trigger is held and fires on release
     charging: false,
     charge: 0,
-    chargeTime: 0
+    chargeTime: 0,
+    // The line the body just crossed, kept briefly so the dash has a visual in
+    // its own colour. Without this the only sign a dash happened is a puff of
+    // particles, and the cooldown circle would have nothing to match.
+    trail: [],
+    trailLife: 0
 };
 
 const DASH_CHARGE_SECONDS = 0.5;
 // What the Charged Dash part buys: a longer, piercing dash
 const DASH_CHARGED_MULTIPLIER = 2.0;
+// How long the crossed line lingers. Long enough to read as a dash, short enough
+// that a second dash does not stack into a smear.
+const DASH_TRAIL_SECONDS = 0.35;
 
 // --- Void Nova -------------------------------------------------------------
 const nova = {
@@ -356,7 +364,10 @@ export function activateTimeDilation() {
 
     skillRegistry.startCooldown('time_dilation', stats.tdCooldown);
     audio.play('time_dilation');
-    spawnBurst(player.x, player.y, SKILLS.time_dilation.color, 14);
+    // Amber drawn inward: the world's motion is being reeled in, so the ring
+    // closes on the player instead of throwing outward like a blast
+    spawnBurst(player.x, player.y, SKILLS.time_dilation.color, 16, -1);
+    spawnShockRing(player.x, player.y, SKILLS.time_dilation.accent, player.radius * 5, 0.5, -1);
     return true;
 }
 
@@ -431,19 +442,19 @@ export function activatePhaseDash(charged = false) {
     dash.dx = dx;
     dash.dy = dy;
     dash._travelled = 0;
-    dash._distance = distance;
+    // Charged Dash travels further for every point invested. The scaling is
+    // measured off the part's own ladder rather than a floating factor.
+    const chargedExtra = charged ? 1 + (stats.pdChargedDash) * (DASH_CHARGED_MULTIPLIER - 1) : 1;
+    dash._distance = distance * chargedExtra;
     dash._fromX = player.x;
     dash._fromY = player.y;
     dash._hit = new Set();
+    dash.trail = [{ x: player.x, y: player.y }];
+    dash.trailLife = 0;
 
     // i-frames cover the whole dash, not just the first frame, so a dash into a
     // body still ends safe
     player.invulnUntil = Math.max(player.invulnUntil, performance.now() / 1000 + stats.pdIFrames);
-
-// Charged Dash travels further for every point invested. The scaling is
-// measured off the part's base ladder rather than a floating factor.
-const chargedExtra = charged ? 1 + (stats.pdChargedDash) * (DASH_CHARGED_MULTIPLIER - 1) : 1;
-dash._distance = distance * (charged ? chargedExtra : 1);
 
     skillRegistry.startCooldown('phase_dash', stats.pdCooldown);
     audio.play('phase_dash');
@@ -497,12 +508,14 @@ function updatePhaseDash(deltaTime) {
     dash._travelled += step;
     player.x = clampToArena(player.x + dash.dx * step, player.radius, 'x');
     player.y = clampToArena(player.y + dash.dy * step, player.radius, 'y');
+    dash.trail.push({ x: player.x, y: player.y });
 
     resolveDashPassThrough();
 
     if (dash.remaining <= 0) {
         dash.active = false;
-        spawnBurst(player.x, player.y, SKILLS.phase_dash.color, dash.charged ? 10 : 5);
+        dash.trailLife = DASH_TRAIL_SECONDS;
+        spawnBurst(player.x, player.y, SKILLS.phase_dash.color, dash.charged ? 14 : 8);
         // Untouchable: the dash ends with a shove, so landing inside a pack
         // pushes it off instead of just relocating the player into it
         if (perks.has('untouchable')) {
@@ -632,6 +645,14 @@ export function activateVoidNova() {
     skillRegistry.startCooldown('void_nova', stats.vnCooldown);
     audio.play('void_nova');
     triggerScreenShake(7, 0.2);
+    // Purple thrown outward for the push, and the Gravity Well draws the same
+    // shape inward. Two rings, so a big blast reads as pressure from two waves
+    // rather than as one thin outline.
+    const novaColor = pulling ? SKILLS.time_dilation.color : SKILLS.void_nova.color;
+    const novaAccent = pulling ? SKILLS.time_dilation.accent : SKILLS.void_nova.accent;
+    spawnBurst(player.x, player.y, novaColor, 22, pulling ? -1 : 1);
+    spawnShockRing(player.x, player.y, novaColor, radius, 0.45, pulling ? -1 : 1);
+    spawnShockRing(player.x, player.y, novaAccent, radius * 0.75, 0.55, pulling ? -1 : 1);
     return true;
 }
 
@@ -656,6 +677,13 @@ export function updateSkills(deltaTime) {
     updateTimeDilation(deltaTime);
     updatePhaseDash(deltaTime);
     updateVoidNova(deltaTime);
+    // Runs on the raw clock, not the dilated one: the dash line is a record of
+    // where the body went, and it should not hang around longer because the
+    // world slowed down.
+    if (dash.trailLife > 0) {
+        dash.trailLife -= deltaTime;
+        if (dash.trailLife <= 0) dash.trail = [];
+    }
 }
 
 // One entry point for the activation key: it routes to whatever is equipped, so
@@ -686,6 +714,15 @@ export function getDashCharge() {
     return dash.charge;
 }
 
+// The line the last dash crossed, with how much of it is left to show. main.js
+// draws this in the skill's own colour.
+export function getDashTrail() {
+    // Visible while the body is still moving along it, then while it fades
+    if (dash.active) return { points: dash.trail, fade: 1 };
+    if (!dash.trail.length || dash.trailLife <= 0) return null;
+    return { points: dash.trail, fade: dash.trailLife / DASH_TRAIL_SECONDS };
+}
+
 // Cleared on every run restart so a dash mid-flight or a dilation mid-window
 // cannot leak into the next run
 export function resetSkills() {
@@ -702,6 +739,8 @@ export function resetSkills() {
     dash.charging = false;
     dash.charge = 0;
     dash.chargeTime = 0;
+    dash.trail = [];
+    dash.trailLife = 0;
 
     nova.ring = null;
     skillRegistry.clearAll();
@@ -1072,6 +1111,10 @@ export function applyTouchLayout(swapped) {
     const controls = document.getElementById('touch-controls');
     if (!controls) return;
     controls.classList.toggle('swapped', !!swapped);
+    // The skill rail sits beside the fire button, so it has to follow the button
+    // across when the sides swap. It lives in the HUD, not the touch overlay, so
+    // it cannot pick the class up from #touch-controls on its own.
+    document.getElementById('hud')?.classList.toggle('swapped', !!swapped);
 }
 
 export function applyGameSettings(settings) {
@@ -1498,6 +1541,13 @@ export function activateEchoShift() {
     // echoShift.lastUsed clock above stays for the replay logic.
     skillRegistry.startCooldown('echo_shift', echoShift.cooldown);
     audio.play('echo_shift');
+    // Cyan outward burst from the position the player just left, in the same
+    // colour as the echo line it starts drawing. The twin echo gets a second,
+    // fainter one so a queued replay is visible before it happens.
+    spawnBurst(player.x, player.y, SKILLS.echo_shift.color, 12, 1);
+    if (echoShift.queued) {
+        spawnShockRing(player.x, player.y, SKILLS.echo_shift.accent, player.radius * 4, 0.4, 1);
+    }
     return true;
 }
 

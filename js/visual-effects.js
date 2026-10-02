@@ -3,6 +3,9 @@ import * as quality from './render-quality.js';
 const particles = [];
 const damageLabels = [];
 const bursts = [];
+// Longer-lived single rings, drawn apart from particles so a big blast still
+// reads when the particle budget is low
+const rings = [];
 let screenShakeEnabled = true;
 let screenShakeUntil = 0;
 let screenShakeStart = 0;
@@ -42,15 +45,36 @@ export function spawnHit(x, y, color, amount, critical = false) {
     damageLabels.push({ x, y, text: critical ? `${Math.round(amount)}!` : `${Math.round(amount)}`, color: critical ? '#ffe2a8' : '#d9f7ff', born: performance.now() / 1000, life: .8 });
 }
 
-export function spawnBurst(x, y, color, count = 12) {
+// Skills need flashes that differ in shape, not just colour: a ring thrown
+// outward reads as a blast, a ring drawn inward reads as a pull, and a scatter
+// reads as a shimmer. `dir` of 1 throws outward, -1 draws inward, and 0 scatters.
+export function spawnBurst(x, y, color, count = 12, dir = 0, speed = 1) {
     const now = performance.now() / 1000;
     const limit = quality.particles();
     for (let i = 0; i < count && particles.length < limit; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const speed = 35 + Math.random() * 90;
-        particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, color, born: now, life: .25 + Math.random() * .35, size: 1.5 + Math.random() * 2.2 });
+        // A ring of evenly spread angles rather than a pure scatter, so the shape
+        // of the effect survives the low particle budget
+        const ringAngle = dir === 0 ? angle : (i / count) * Math.PI * 2 + angle * 0.15;
+        const base = 35 + Math.random() * 90;
+        const magnitude = dir === 0 ? base : (dir > 0 ? 90 + base : -70 - base * 0.4);
+        const spd = magnitude * speed;
+        particles.push({
+            x, y,
+            vx: Math.cos(ringAngle) * spd,
+            vy: Math.sin(ringAngle) * spd,
+            color, born: now,
+            life: .25 + Math.random() * .35,
+            size: 1.5 + Math.random() * 2.2
+        });
     }
     bursts.push({ x, y, color, born: now, life: .32 });
+}
+
+// A single expanding ring of its own, for effects that need to be readable for
+// longer than a particle burst survives. Pulled inward when `dir` is -1.
+export function spawnShockRing(x, y, color, radius, life = 0.45, dir = 1) {
+    rings.push({ x, y, color, radius, born: performance.now() / 1000, life, dir });
 }
 
 export function update(deltaTime) {
@@ -65,10 +89,32 @@ export function update(deltaTime) {
     const now = performance.now() / 1000;
     for (let i = damageLabels.length - 1; i >= 0; i--) if (now - damageLabels[i].born >= damageLabels[i].life) damageLabels.splice(i, 1);
     for (let i = bursts.length - 1; i >= 0; i--) if (now - bursts[i].born >= bursts[i].life) bursts.splice(i, 1);
+    for (let i = rings.length - 1; i >= 0; i--) if (now - rings[i].born >= rings[i].life) rings.splice(i, 1);
 }
 
 export function render(ctx, now = performance.now() / 1000) {
     ctx.save();
+
+    // Shock rings first, so particles land on top of them
+    for (const r of rings) {
+        const age = (now - r.born) / r.life;
+        if (age < 0 || age > 1) continue;
+        const ease = r.dir > 0
+            // Outward: eases out from nothing, the shape of a blast
+            ? 1 - Math.pow(1 - age, 3)
+            // Inward: starts wide and closes on the centre, the shape of a pull
+            : age;
+        const alpha = Math.max(0, (1 - age) * 0.7);
+        if (alpha <= 0) continue;
+        const radius = Math.max(1, r.radius * ease);
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = r.color;
+        ctx.lineWidth = Math.max(0.5, 4 * (1 - age));
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
     for (const b of bursts) {
         const age = (now - b.born) / b.life;
         ctx.globalAlpha = Math.max(0, 1 - age);
@@ -101,4 +147,4 @@ export function render(ctx, now = performance.now() / 1000) {
     ctx.restore();
 }
 
-export function clear() { particles.length = 0; damageLabels.length = 0; bursts.length = 0; }
+export function clear() { particles.length = 0; damageLabels.length = 0; bursts.length = 0; rings.length = 0; }

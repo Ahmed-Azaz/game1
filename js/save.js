@@ -102,8 +102,10 @@ function uiSettingsApply(settings) {
     }
     if (settings.swapTouchSides !== undefined) {
         // The layout is a class on the touch overlay, so it applies directly
-        // rather than through a module that has to be imported first
+        // rather than through a module that has to be imported first. The HUD
+        // gets the same flag because the skill rail follows the fire button.
         document.getElementById('touch-controls')?.classList.toggle('swapped', !!settings.swapTouchSides);
+        document.getElementById('hud')?.classList.toggle('swapped', !!settings.swapTouchSides);
     }
 }
 

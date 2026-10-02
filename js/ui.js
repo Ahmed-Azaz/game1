@@ -698,8 +698,12 @@ export function selectSkill(id) {
     if (statScreenMode !== 'manual') renderStatScreen();
 }
 
-// Repaints the rail and the indicator. Cheap enough to run every HUD tick; the
-// only writes are text and a colour, and only when the value actually changed.
+// Repaints the rail. Cheap enough to run every HUD tick; the only writes are
+// text and a class, and only when the value actually changed.
+//
+// There is no cooldown bar here on purpose. The cooldown circle is drawn on the
+// canvas around the player, and it takes its colour from whichever skill is
+// equipped, so one circle serves all four.
 export function syncSkillRail() {
     const equippedId = skillRegistry.getEquippedId();
     const equipped = SKILLS[equippedId];
@@ -716,30 +720,6 @@ export function syncSkillRail() {
         const cd = chip.querySelector('.skill-chip-cd');
         if (cd) cd.textContent = remaining > 0.001 ? `${remaining.toFixed(0)}s` : '';
     });
-
-    const indicator = document.getElementById('skill-indicator');
-    if (!indicator) return;
-    const remaining = skillRegistry.getCooldownRemaining(equippedId);
-    const total = skillRegistry.getCooldownFor(equippedId) || 0;
-
-    // Hidden entirely when the skill is ready, which keeps the screen clean
-    // between fights. The only thing on screen is the skill that needs attention.
-    indicator.style.display = remaining > 0.001 ? 'block' : 'none';
-
-    const label = document.getElementById('skill-indicator-label');
-    if (label) label.textContent = `${equipped.shortName} RECHARGING`;
-    const time = document.getElementById('skill-indicator-time');
-    if (time) time.textContent = `${remaining.toFixed(1)}s`;
-    const fill = document.getElementById('skill-indicator-fill');
-    if (fill) {
-        // Draining: the bar empties as the skill recovers
-        const ratio = total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0;
-        fill.style.width = `${ratio * 100}%`;
-    }
-    // Repainted in the equipped skill's own colour, so the bar is identifiable
-    // at a glance as belonging to the skill that is actually selected
-    indicator.style.setProperty('--skill-color', equipped.color);
-    indicator.style.setProperty('--skill-accent', equipped.accent);
 
     const touchBtn = document.getElementById('touch-skill-btn');
     if (touchBtn) touchBtn.textContent = equipped.shortName;

@@ -2,9 +2,9 @@
 import {
     initGame, update as gameUpdate, echoShift, getRunTime, gameplayStart, gameplayStop,
     isMarked, activateEquippedSkill, beginDashCharge, releaseDashCharge, cancelDashCharge,
-    getWorldTimeScale, getNovaRing
+    getWorldTimeScale, getNovaRing, getDashTrail
 } from './game.js';
-import { SKILL_ORDER, skillRegistry } from './skills.js';
+import { SKILL_ORDER, SKILLS, skillRegistry } from './skills.js';
 import { player } from './player.js';
 import { resetAll as resetEnemies, getActiveEnemies } from './enemies.js';
 import * as projectiles from './projectiles.js';
@@ -167,7 +167,7 @@ function render() {
     drawPlayerAura(ctx, t);
     drawAttackLine(ctx, enemies, t);
     drawPlayer(ctx, t);
-    drawEchoCooldownRing(ctx, t);
+    drawSkillCooldownRing(ctx, t);
     drawSkillVisuals(ctx, t);
     drawPlayerHealthBar(ctx);
     visualEffects.render(ctx, t);
@@ -179,41 +179,102 @@ function render() {
 // and the nova ring. All three are cheap outlines rather than filled gradients,
 // which keeps them readable over a busy arena without costing much.
 function drawSkillVisuals(ctx, t) {
-    // Time Dilation: a cold wash plus a pulsing rim on the player, so the state
-    // is obvious without reading the HUD.
-    const scale = getWorldTimeScale();
-    if (scale < 1) {
+    // Phase Dash: the line the body crossed, in pale silver. A wide soft body
+    // under a thin bright core reads as a blink rather than a weapon, and the
+    // afterimage of where you were is legible for a moment after you arrive.
+    const trail = getDashTrail();
+    if (trail && trail.points.length > 1) {
+        const skill = SKILLS.phase_dash;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.strokeStyle = `rgba(125, 211, 255, ${0.10 + 0.06 * Math.sin(t * 6)})`;
-        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(trail.points[0].x, trail.points[0].y);
+        for (const point of trail.points) ctx.lineTo(point.x, point.y);
+
+        // Wide, dim underlay: the bulk of the blink
+        ctx.strokeStyle = hexToRgba(skill.color, 0.18 * trail.fade);
+        ctx.lineWidth = 16;
+        ctx.stroke();
+        // Mid stroke, the readable body of it
+        ctx.strokeStyle = hexToRgba(skill.color, 0.5 * trail.fade);
+        ctx.lineWidth = 5;
+        ctx.stroke();
+        // Thin white core, the leading edge
+        ctx.strokeStyle = hexToRgba(skill.accent, 0.85 * trail.fade);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // A ghost of the body at the start and end of the line, so the teleport
+        // reads as leaving one place and arriving at another
+        for (const [point, scale] of [[trail.points[0], 0.75], [trail.points[trail.points.length - 1], 1]]) {
+            ctx.globalAlpha = trail.fade * scale;
+            ctx.fillStyle = hexToRgba(skill.color, 0.5);
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, player.radius * 0.9, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    // Time Dilation: the world drops into amber. A warm wash along the arena
+    // edge plus a rim on the player, both in the skill's own colour so the
+    // effect and its cooldown circle are unmistakably the same thing.
+    const scale = getWorldTimeScale();
+    if (scale < 1) {
+        const skill = SKILLS.time_dilation;
+        const depth = 1 - scale;
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = hexToRgba(skill.color, (0.09 + 0.07 * Math.sin(t * 6)) * (0.4 + depth));
+        ctx.lineWidth = 3;
         ctx.strokeRect(6, 6, 960 - 12, 540 - 12);
+        ctx.restore();
+
+        // A second, inset frame: the deeper the dilation, the further in it sits,
+        // which gives the effect a readable intensity without changing opacity
+        // enough to wash the arena out
+        const inset = 10 + depth * 90;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = hexToRgba(skill.accent, (0.10 + 0.06 * Math.sin(t * 6 - 1)) * depth);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(inset, inset, 960 - inset * 2, 540 - inset * 2);
         ctx.restore();
 
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.strokeStyle = `rgba(205, 238, 255, ${0.35 + 0.2 * Math.sin(t * 9)})`;
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = hexToRgba(skill.accent, 0.3 + 0.22 * Math.sin(t * 9));
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(player.x, player.y, 26, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
     }
 
-    // Void Nova: an expanding ring, magenta for the push, cyan-shifted when the
-    // gravity well has inverted it, so the two forms are distinguishable after
-    // the flash is over.
+    // Void Nova: an expanding ring. The blast is the skill's purple; the
+    // inverted Gravity Well pulls in the skill's amber so the two forms stay
+    // distinguishable once the flash is gone.
     const ring = getNovaRing();
     if (ring) {
         const t01 = ring.elapsed / ring.life;
+        const skill = ring.pulling ? SKILLS.time_dilation : SKILLS.void_nova;
+        const fade = 1 - t01;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.strokeStyle = ring.pulling
-            ? `rgba(125, 211, 255, ${(1 - t01) * 0.75})`
-            : `rgba(242, 184, 255, ${(1 - t01) * 0.75})`;
+        ctx.strokeStyle = hexToRgba(skill.color, fade * 0.75);
         ctx.lineWidth = 3 * (1 - t01 * 0.6);
         ctx.beginPath();
         ctx.arc(ring.x, ring.y, Math.max(1, ring.radius), 0, Math.PI * 2);
+        ctx.stroke();
+        // A trailing inner ring, so a heavy blast reads as pressure rather than
+        // as a single thin circle
+        ctx.strokeStyle = hexToRgba(skill.accent, fade * 0.4);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(ring.x, ring.y, Math.max(1, ring.radius * 0.72), 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
     }
@@ -579,20 +640,44 @@ function drawPlayer(ctx, t) {
     ctx.restore();
 }
 
-// Persistent cooldown ring, so readiness is readable without looking at the HUD.
+// The cooldown circle around the player, so readiness is readable without
+// looking at the HUD. This is one ring, not one per skill: it draws whichever
+// skill is equipped and repaints itself in that skill's colour, so switching
+// hands the circle over rather than adding another one.
 // The ring sits just outside the hull, so it tracks the body size rather than
 // carrying a hardcoded radius that would drift out of proportion
 function cooldownRingRadius() {
     return Math.max(12, player.radius * 2);
 }
 
-function drawEchoCooldownRing(ctx, t) {
-    if (!echoShift) return;
-    const remaining = Math.max(0, echoShift.cooldown - (getRunTime() - echoShift.lastUsed));
-    if (remaining <= 0) {
+// What the circle should be showing this frame, separated from the drawing so it
+// can be read without a canvas: which skill it belongs to, and whether it is
+// counting down or idling.
+export function getCooldownRingState() {
+    const id = skillRegistry.getEquippedId();
+    const skill = SKILLS[id];
+    const remaining = skillRegistry.getCooldownRemaining(id);
+    const total = skillRegistry.getCooldownFor(id);
+    return {
+        skillId: id,
+        color: skill ? skill.color : '#ffffff',
+        accent: skill ? skill.accent : '#ffffff',
+        remaining,
+        total,
+        ready: remaining <= 0.001,
+        ratio: total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0
+    };
+}
+
+function drawSkillCooldownRing(ctx, t) {
+    const ring = getCooldownRingState();
+
+    ctx.save();
+    if (ring.ready) {
+        // Ready: a dashed ring in the skill's own colour, breathing so it reads as
+        // available rather than as a static decoration
         const pulse = .35 + Math.sin(t * 3) * .12;
-        ctx.save();
-        ctx.strokeStyle = `rgba(105,239,255,${pulse})`;
+        ctx.strokeStyle = hexToRgba(ring.color, pulse);
         ctx.lineWidth = 1.5;
         ctx.setLineDash([3, 6]);
         ctx.beginPath();
@@ -602,20 +687,26 @@ function drawEchoCooldownRing(ctx, t) {
         return;
     }
 
-    const ratio = Math.min(1, remaining / echoShift.cooldown);
-    ctx.save();
     ctx.strokeStyle = 'rgba(120,140,190,.28)';
     ctx.lineWidth = 2.5;
-ctx.beginPath();
+    ctx.beginPath();
     ctx.arc(player.x, player.y, cooldownRingRadius(), 0, Math.PI * 2);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(182,154,255,.85)';
+    ctx.strokeStyle = hexToRgba(ring.accent, .85);
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.arc(player.x, player.y, cooldownRingRadius(), -Math.PI / 2, -Math.PI / 2 + (1 - ratio) * Math.PI * 2);
+    ctx.arc(player.x, player.y, cooldownRingRadius(), -Math.PI / 2, -Math.PI / 2 + (1 - ring.ratio) * Math.PI * 2);
     ctx.stroke();
     ctx.restore();
+}
+
+// The skill colours are declared as hex strings so they can be shared with CSS
+// and the HUD. Canvas wants rgba components, so they are split here rather than
+// storing two versions of every colour.
+function hexToRgba(hex, alpha) {
+    const value = parseInt(hex.slice(1), 16);
+    return `rgba(${(value >> 16) & 255},${(value >> 8) & 255},${value & 255},${alpha})`;
 }
 
 function drawPlayerHealthBar(ctx) {

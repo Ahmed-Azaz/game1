@@ -1,0 +1,12 @@
+skill bar should be on the same side as sp.atk butto
+skills should be icons
+do somthing about the mess in the top left corner
+nova needs base range and power increased, potentially others as well
+dash sometimes goes in random directions
+what does gravity well in nova do?
+what is the point of dash if it doesnt do damage
+needs more optimization for the mobile view
+fix all ui placement
+the ui needs an upgrade
+the stats screen should be minified and its contents ui placed so that it doesnt take much space
+the stat screen page jumps up when pressing upgrade for the stats and skills

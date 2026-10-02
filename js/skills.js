@@ -21,9 +21,12 @@ export const SKILLS = {
         id: 'echo_shift',
         name: 'Echo Shift',
         shortName: 'ECHO',
-        // Cyan-violet: shares the echo trail's own visual language
-        color: '#7f9eff',
-        accent: '#b9c9ff',
+        // Taken from the line the trail actually draws: #4fdeeb is the mid stroke
+        // and #b8ffff the head. The cooldown circle uses these so the two are
+        // unmistakably the same skill.
+        color: '#4fdeeb',
+        accent: '#b8ffff',  // Echo Shift's colour is unchanged: you named the other
+        // three, and this one already matches the line it draws.
         key: 'SPACE',
         cooldownStat: 'echoCooldown',
         description: 'Freeze the path you just walked and send an echo back along it. The line snaps into place almost instantly, then stands as a solid wall that enemies cannot cross.',
@@ -38,8 +41,10 @@ export const SKILLS = {
         name: 'Time Dilation',
         shortName: 'DILATE',
         // Pale cyan: reads as "the world turned to ice"
-        color: '#7dd3ff',
-        accent: '#cdeeff',
+        // Amber: the dilation is warm rather than cold, so it never reads as the Echo's
+        // cyan wall. accent is the pale rim on the player.
+        color: '#ffb84d',
+        accent: '#ffe6bd',
         key: '1',
         cooldownStat: 'tdCooldown',
         description: 'The world drops into syrup while you keep your speed. Threats slow to a crawl, which is the only way to read a Rift Lance or a gravity well in time. Pushing the world deeper costs you your own movement.',
@@ -54,9 +59,10 @@ export const SKILLS = {
         id: 'phase_dash',
         name: 'Phase Dash',
         shortName: 'DASH',
-        // Violet: dash family, distinct from the Echo's cooler cyan
-        color: '#b89eff',
-        accent: '#e0d4ff',
+        // Pale silver: reads as a clean blink rather than an explosion, and stays
+        // legible over a busy arena because it is the brightest of the four.
+        color: '#f2f6ff',
+        accent: '#ffffff',
         key: '2',
         cooldownStat: 'pdCooldown',
         description: 'Blink a short distance the way you are holding and pass through everything on the way, untouchable for a moment. Hold the button to charge it into a longer, harder dash.',
@@ -71,9 +77,9 @@ export const SKILLS = {
         id: 'void_nova',
         name: 'Void Nova',
         shortName: 'NOVA',
-        // Magenta: the warm inverse of the Echo wall's cold cyan
-        color: '#f2b8ff',
-        accent: '#ffd8ff',
+        // Purple: the deepest colour of the four, so a heavy blast reads as heavy.
+        color: '#b04dff',
+        accent: '#e0b3ff',
         key: '3',
         cooldownStat: 'vnCooldown',
         description: 'Blast everything around you outward and hurt whatever it touches. Buy the Gravity Well part to invert it and drag the pack into the middle instead.',

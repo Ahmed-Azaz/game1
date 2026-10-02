@@ -656,7 +656,7 @@ body {
 #onboarding-prompt1,#onboarding-prompt2,#onboarding-prompt3,#onboarding-prompt4 { background:linear-gradient(100deg,rgba(19,31,57,.8),rgba(18,23,45,.72));border:1px solid rgba(125,167,215,.18);border-radius:2px;color:#c8d9ee;letter-spacing:.035em; }
 .stat-row { background:rgba(135,180,232,.055);border:1px solid rgba(125,167,215,.1);border-radius:2px; }
 .stat-plus { border-radius:2px; }
-@media(max-width:600px) { #hud{top:12px;left:12px} #xp-bar-container{width:min(42vw,180px)} #skill-indicator{top:12px;right:12px;padding:7px 9px;font-size:9px;gap:6px} #pause-button{top:12px;right:145px;width:30px;height:30px;line-height:28px} #pause-menu .menu-overlay,#game-over .menu-overlay{padding:22px 20px} }
+@media(max-width:600px) { #hud{top:12px;left:12px} #xp-bar-container{width:min(42vw,180px)} #pause-button{top:12px;right:145px;width:30px;height:30px;line-height:28px} #pause-menu .menu-overlay,#game-over .menu-overlay{padding:22px 20px} }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after{scroll-behavior:auto!important;transition:none!important} }
 
 #touch-controls {
@@ -803,20 +803,28 @@ body {
 }
 
 /* --- Skill selection rail -------------------------------------------------
-   A vertical strip on the right edge. It is inside the HUD overlay, so it lives
-   in overlay pixels rather than arena pixels and stays put while the canvas
-   scales. Chips are large enough to tap on a phone and shrink to a key hint on
-   desktop. */
+   A vertical strip beside the button that fires the equipped skill, not beside
+   the joystick: you pick a skill with your other thumb than the one you hold
+   the stick with, so the two belong on the same side. The rail lives in the HUD
+   overlay rather than the touch overlay, so it is positioned in overlay pixels
+   and stays put while the canvas scales. The offset clears the fire button. */
 #skill-rail {
     position: absolute;
-    top: 50%;
-    right: 10px;
-    transform: translateY(-50%);
+    bottom: 104px;
+    left: 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
     pointer-events: auto;
     z-index: 6;
+}
+
+/* Swapped layout puts the fire button on the right, so the rail follows it.
+   #hud carries the same flag as #touch-controls, since the rail is not a
+   descendant of the touch overlay and cannot inherit its class. */
+#hud.swapped #skill-rail {
+    left: auto;
+    right: 10px;
 }
 
 /* The equipped chip is the only one that keeps full opacity; the rest stay
@@ -873,53 +881,6 @@ body {
     min-height: 11px;
 }
 
-/* --- Single cooldown indicator --------------------------------------------
-   There is one of these, not one per skill. It is repainted in the equipped
-   skill's colour and shows that skill's own remaining time, so it disappears
-   the moment you switch away and comes back showing the real remainder. */
-#skill-indicator {
-    position: absolute;
-    left: 50%;
-    bottom: 96px;
-    transform: translateX(-50%);
-    min-width: 190px;
-    padding: 7px 12px;
-    background: rgba(8, 16, 28, 0.82);
-    border: 1px solid var(--skill-color);
-    border-radius: 5px;
-    text-align: center;
-    pointer-events: none;
-    z-index: 5;
-}
-
-#skill-indicator-label {
-    display: block;
-    font-size: 9px;
-    letter-spacing: 0.14em;
-    color: var(--skill-accent);
-}
-
-#skill-indicator-time {
-    display: block;
-    font-size: 16px;
-    font-weight: 700;
-    color: #e7f3ff;
-    margin: 1px 0 5px;
-}
-
-#skill-indicator-track {
-    height: 4px;
-    background: rgba(125, 167, 215, 0.2);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-#skill-indicator-fill {
-    height: 100%;
-    width: 0%;
-    background: var(--skill-color);
-    border-radius: 2px;
-}
 
 /* The Skills tab card for the equipped skill, tinted with its own colour */
 .skill-card.equipped {
@@ -942,19 +903,20 @@ body {
    disappearing: switching skills has to stay reachable during a fight. */
 @media (max-width: 700px) {
     #skill-rail {
-        right: 6px;
+        bottom: 92px;
+        left: 6px;
         gap: 5px;
+    }
+
+    #hud.swapped #skill-rail {
+        left: auto;
+        right: 6px;
     }
 
     .skill-chip {
         min-width: 50px;
         padding: 6px 4px;
         font-size: 8px;
-    }
-
-    #skill-indicator {
-        bottom: 88px;
-        min-width: 160px;
     }
 }
 
