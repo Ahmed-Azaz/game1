@@ -692,7 +692,7 @@ function drawSkillCooldownRing(ctx, t) {
     ctx.beginPath();
     ctx.arc(player.x, player.y, cooldownRingRadius(), 0, Math.PI * 2);
     ctx.stroke();
-    ctx.strokeStyle = hexToRgba(ring.accent, .85);
+    ctx.strokeStyle = hexToRgba(ring.color, .9);
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -882,12 +882,35 @@ const touchStick = {
 
 // Every path that clears the stick goes through here, so the smoothed vector and
 // the raw target can never disagree about whether the thumb is down.
+//
+// The knob is recentred here too, not only on release. Resetting only the vector
+// left the knob drawn wherever the thumb last was, so a stick held at the moment
+// the level-up screen opened came back still deflected after the upgrade: the
+// player was told there was no input, and the control said otherwise. The
+// vector is what moves the player, so that part was always correct; this is the
+// control lying about its own state.
 function resetTouchStick() {
+    // Capture is released before the id is dropped. While the stick holds a
+    // capture the browser keeps routing that finger to it, and the matching
+    // pointerup would be ignored once the id no longer matched, leaving the
+    // capture stuck for the rest of the run.
+    const area = document.getElementById('joystick-area');
+    if (area && touchStick.pointerId !== null) {
+        try {
+            if (area.hasPointerCapture(touchStick.pointerId)) {
+                area.releasePointerCapture(touchStick.pointerId);
+            }
+        } catch {
+            // The pointer is already gone, so there is nothing to release
+        }
+    }
     touchStick.pointerId = null;
     touchStick.targetX = 0;
     touchStick.targetY = 0;
     joystickVector.x = 0;
     joystickVector.y = 0;
+    const stick = document.getElementById('joystick-stick');
+    if (stick) stick.style.transform = 'translate(0px, 0px)';
 }
 
 // Exponential smoothing toward the target, framerate independent. Release is

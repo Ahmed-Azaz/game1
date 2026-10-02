@@ -55,8 +55,8 @@ attackRange: { base: 150, points: 0, increment: 10, min: 0, max: 300 },
         pdChargedDash: { base: 0, points: 0, increment: 0.2, min: 0, max: 1.0 },
 
         // Skill parts for Void Nova
-        vnRadius: { base: 60, points: 0, percentPerPoint: 0.08, round: 'ceil', min: 40, max: 140 },
-        vnForce: { base: 1.0, points: 0, percentPerPoint: 0.05 },
+        vnRadius: { base: 90, points: 0, percentPerPoint: 0.08, round: 'ceil', min: 40, max: 140 },
+        vnForce: { base: 1.0, points: 0, percentPerPoint: 0.1 },
         vnCooldown: { base: 12.0, points: 0, increment: -0.75, min: 3.0 },
         // 0.2 per point so the inversion at halfway (5 points) and the cap at 1.0
         // (5 more) are both a real spend rather than two clicks
