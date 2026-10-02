@@ -638,11 +638,11 @@ body {
    frame the canvas changed, which on a phone GPU costs more than the entire
    scene it was tinting. The saturation it added is now baked into the palette
    colours in js/main.js, so nothing is lost and the compositor stays idle. */
-#hud { top:22px;left:24px;gap:7px;text-shadow:0 0 14px rgba(85,206,255,.4); }
-#level-display { font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#d7ecff; }
-#xp-bar-container { width:210px;height:5px;background:rgba(110,146,191,.2);border:1px solid rgba(131,182,226,.28);border-radius:99px;box-shadow:0 0 18px rgba(86,121,255,.12); }
+#hud { top:22px;left:24px;gap:6px;text-shadow:0 0 14px rgba(85,206,255,.4); }
+#level-display { font-size:clamp(11px,1.8vw,13px);letter-spacing:.16em;text-transform:uppercase;color:#d7ecff;line-height:1.1; }
+#xp-bar-container { width:min(40vw,210px);height:4px;background:rgba(110,146,191,.2);border:1px solid rgba(131,182,226,.28);border-radius:99px;box-shadow:0 0 18px rgba(86,121,255,.12); }
 #xp-bar-fill { background:linear-gradient(90deg,#9a7bff,#52e8ff);box-shadow:0 0 12px rgba(82,232,255,.7); }
-#xp-text { font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8da8c7; }
+#xp-text { font-size:clamp(9px,1.6vw,10px);letter-spacing:.12em;text-transform:uppercase;color:#8da8c7;line-height:1.1; }
 #pause-button { top:22px;right:178px;width:34px;height:34px;line-height:32px;border-radius:3px;border-color:rgba(143,183,222,.4);background:rgba(12,19,39,.76);color:#c8dcf4;box-shadow:0 0 18px rgba(83,142,206,.12);transition:.18s ease; }
 #pause-button:hover { border-color:#69efff;color:#fff;box-shadow:0 0 18px rgba(83,224,255,.35); }
 #pause-menu,#game-over { background:rgba(3,6,16,.72);backdrop-filter:blur(10px); }
@@ -656,7 +656,7 @@ body {
 #onboarding-prompt1,#onboarding-prompt2,#onboarding-prompt3,#onboarding-prompt4 { background:linear-gradient(100deg,rgba(19,31,57,.8),rgba(18,23,45,.72));border:1px solid rgba(125,167,215,.18);border-radius:2px;color:#c8d9ee;letter-spacing:.035em; }
 .stat-row { background:rgba(135,180,232,.055);border:1px solid rgba(125,167,215,.1);border-radius:2px; }
 .stat-plus { border-radius:2px; }
-@media(max-width:600px) { #hud{top:12px;left:12px} #xp-bar-container{width:min(42vw,180px)} #pause-button{top:12px;right:145px;width:30px;height:30px;line-height:28px} #pause-menu .menu-overlay,#game-over .menu-overlay{padding:22px 20px} }
+@media(max-width:600px) { #hud{top:8px;left:8px;gap:4px} #xp-bar-container{width:min(38vw,150px);height:3px} #pause-button{top:8px;right:8px;width:30px;height:30px;line-height:28px} #run-info{gap:clamp(2px,1.5vw,6px);max-width:min(68vw,180px)} #pause-menu .menu-overlay,#game-over .menu-overlay{padding:22px 20px} }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after{scroll-behavior:auto!important;transition:none!important} }
 
 #touch-controls {
@@ -1116,11 +1116,15 @@ body {
 }
 #run-info {
     display: flex;
-    gap: 14px;
-    font-size: 10px;
-    letter-spacing: .12em;
+    gap: clamp(4px, 2vw, 10px);
+    font-size: clamp(8px, 2.2vw, 10px);
+    letter-spacing: .08em;
     text-transform: uppercase;
     color: #8da8c7;
     font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    flex-wrap: wrap;
+    max-width: min(70vw, 240px);
+    justify-content: flex-start;
 }
 #run-info .record { color: #ffd9a8; }
