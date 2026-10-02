@@ -21,6 +21,12 @@ export const SKILLS = {
         id: 'echo_shift',
         name: 'Echo Shift',
         shortName: 'ECHO',
+        // A dot with two ripples trailing behind it: the afterimage following
+        // the path you already walked. Drawn as paths only; ui.js wraps these in
+        // the shared <svg> so the viewBox and stroke settings live in one place.
+        icon: '<circle cx="16" cy="12" r="2.4" fill="currentColor" stroke="none"/>'
+            + '<path d="M16 6a6 6 0 0 0 0 12"/>'
+            + '<path d="M16 2a10 10 0 0 0 0 20"/>',
         // Taken from the line the trail actually draws: #4fdeeb is the mid stroke
         // and #b8ffff the head. The cooldown circle uses these so the two are
         // unmistakably the same skill.
@@ -40,6 +46,13 @@ export const SKILLS = {
         id: 'time_dilation',
         name: 'Time Dilation',
         shortName: 'DILATE',
+        // An hourglass on its side would read as a stopwatch at 16px, which is
+        // the wrong idea: this slows the world, it does not stop it. So it is a
+        // clock face with a heavy hand, and the sand line beneath it is what
+        // makes it amber rather than a plain dial.
+        icon: '<circle cx="12" cy="12" r="8.4"/>'
+            + '<path d="M12 6.8V12l3.6 2.4"/>'
+            + '<path d="M4.6 20.4h14.8"/>',
         // Pale cyan: reads as "the world turned to ice"
         // Amber: the dilation is warm rather than cold, so it never reads as the Echo's
         // cyan wall. accent is the pale rim on the player.
@@ -59,6 +72,10 @@ export const SKILLS = {
         id: 'phase_dash',
         name: 'Phase Dash',
         shortName: 'DASH',
+        // A forward double chevron. Reads as "moved" at a glance without
+        // borrowing the arrow language a movement key would use.
+        icon: '<path d="M6.4 5.4 12 12l-5.6 6.6"/>'
+            + '<path d="M13.6 5.4 19.2 12l-5.6 6.6"/>',
         // Pale silver: reads as a clean blink rather than an explosion, and stays
         // legible over a busy arena because it is the brightest of the four.
         color: '#f2f6ff',
@@ -77,6 +94,11 @@ export const SKILLS = {
         id: 'void_nova',
         name: 'Void Nova',
         shortName: 'NOVA',
+        // A burst of eight rays: the push is radial, so the mark has to be too.
+        // The centre is left open because the blast moves things away from it.
+        icon: '<circle cx="12" cy="12" r="2.6"/>'
+            + '<path d="M12 2.6v3.2M12 18.2v3.2M2.6 12h3.2M18.2 12h3.2"/>'
+            + '<path d="M5.4 5.4 7.7 7.7M16.3 16.3l2.3 2.3M18.6 5.4l-2.3 2.3M7.7 16.3l-2.3 2.3"/>',
         // Purple: the deepest colour of the four, so a heavy blast reads as heavy.
         color: '#b04dff',
         accent: '#e0b3ff',

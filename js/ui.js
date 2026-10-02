@@ -661,13 +661,18 @@ function renderSkillsTab() {
 function buildSkillRail() {
     const rail = document.getElementById('skill-rail');
     if (!rail) return;
-    rail.innerHTML = SKILL_ORDER.map((id, i) => {
+    rail.innerHTML = SKILL_ORDER.map((id) => {
         const skill = SKILLS[id];
+        // The chip carries the icon instead of the name. Four words stacked up
+        // took more room than the fight did, and the label was only ever read
+        // once; after that the shape is what gets recognised. The name stays on
+        // the title attribute, so a long press or a hover still spells it out.
         return `
             <button class="skill-chip" data-skill="${id}" title="${skill.name} (${skill.key})"
-                    style="--skill-color: ${skill.color}; --skill-accent: ${skill.accent}">
-                <span class="skill-chip-key">${i + 1}</span>
-                <span class="skill-chip-name">${skill.shortName}</span>
+                    aria-label="${skill.name}" style="--skill-color: ${skill.color}; --skill-accent: ${skill.accent}">
+                <svg class="skill-chip-icon" viewBox="0 0 24 24" aria-hidden="true"
+                     fill="none" stroke="currentColor" stroke-width="1.9"
+                     stroke-linecap="round" stroke-linejoin="round">${skill.icon}</svg>
                 <span class="skill-chip-cd"></span>
             </button>
         `;
@@ -722,7 +727,13 @@ export function syncSkillRail() {
     });
 
     const touchBtn = document.getElementById('touch-skill-btn');
-    if (touchBtn) touchBtn.textContent = equipped.shortName;
+    // The fire button still uses the word: it is the one place the player looks
+    // to confirm what the button will actually do, and there is room for it.
+    if (touchBtn) {
+        touchBtn.textContent = equipped.shortName;
+        touchBtn.style.setProperty('--skill-color', equipped.color);
+        touchBtn.style.setProperty('--skill-accent', equipped.accent);
+    }
 }
 
 function closeStatScreenAndResume() {

@@ -708,8 +708,10 @@ body {
     right: auto;
     width: 80px;
     height: 80px;
-    background: rgba(182, 154, 255, 0.2);
-    border: 2px solid rgba(182, 154, 255, 0.5);
+    /* Tinted from the equipped skill at runtime, with the violet here as the
+       value before any skill has been equipped. */
+    background: color-mix(in srgb, var(--skill-color, #b69aff) 20%, transparent);
+    border: 2px solid color-mix(in srgb, var(--skill-color, #b69aff) 55%, transparent);
     border-radius: 50%;
     color: #e7f3ff;
     text-align: center;
@@ -721,7 +723,7 @@ body {
     user-select: none;
 }
 #touch-skill-btn:active {
-    background: rgba(182, 154, 255, 0.5);
+    background: color-mix(in srgb, var(--skill-color, #b69aff) 50%, transparent);
 }
 
 /* Keep the logical 16:9 canvas fully visible at every viewport size. */
@@ -830,21 +832,19 @@ body {
 /* The equipped chip is the only one that keeps full opacity; the rest stay
    readable but recede, so the eye goes to the skill you are actually holding. */
 .skill-chip {
+    position: relative;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1px;
-    min-width: 62px;
-    padding: 7px 6px;
+    /* Square now that the chip is an icon: the name was what made it wide. */
+    width: 36px;
+    height: 36px;
+    padding: 0;
     background: rgba(8, 16, 28, 0.72);
     border: 1px solid rgba(125, 167, 215, 0.28);
     border-left: 3px solid var(--skill-color);
     border-radius: 5px;
-    color: var(--text-secondary);
-    font-family: inherit;
-    font-size: 9px;
-    letter-spacing: 0.08em;
+    color: var(--skill-color);
     cursor: pointer;
     opacity: 0.62;
     transition: opacity .12s ease, border-color .12s ease, background .12s ease;
@@ -865,20 +865,29 @@ body {
     opacity: 0.45;
 }
 
-.skill-chip-key {
-    font-size: 8px;
-    opacity: 0.65;
+/* The icon fills the chip. Sized off the box rather than fixed so it scales with
+   the chip when the narrow-screen rule shrinks it. */
+.skill-chip-icon {
+    width: 74%;
+    height: 74%;
+    display: block;
+    pointer-events: none;
 }
 
-.skill-chip-name {
-    font-weight: 700;
-    color: inherit;
-}
-
+/* Cooldown seconds ride on the chip as a badge rather than as a row of their own,
+   since the chip has no room left for a line of text underneath the icon. */
 .skill-chip-cd {
-    font-size: 9px;
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0 3px;
+    border-radius: 3px;
+    background: rgba(4, 9, 18, 0.95);
+    font-size: 8px;
+    line-height: 11px;
+    white-space: nowrap;
     color: var(--skill-color);
-    min-height: 11px;
 }
 
 
@@ -914,9 +923,8 @@ body {
     }
 
     .skill-chip {
-        min-width: 50px;
-        padding: 6px 4px;
-        font-size: 8px;
+        width: 32px;
+        height: 32px;
     }
 }
 
